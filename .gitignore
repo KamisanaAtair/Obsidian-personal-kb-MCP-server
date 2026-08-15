@@ -29,3 +29,6 @@ Thumbs.db
 
 # 学习副本（项目结构镜像，不提交）
 learning/
+
+# Workbuddy 工作记忆
+.workbuddy/
