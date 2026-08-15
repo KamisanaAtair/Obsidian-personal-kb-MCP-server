@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# 环境变量（含占位 key，不提交）
+.env
+
+# 向量库本地持久化
+.chroma_db/
+
+# LangGraph
+.langgraph/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 学习副本（项目结构镜像，不提交）
+learning/

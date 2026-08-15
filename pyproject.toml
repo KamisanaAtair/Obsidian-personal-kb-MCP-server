@@ -1,0 +1,66 @@
+[project]
+name = "personal-kb-multiagent"
+version = "0.1.0"
+description = "个人知识库多智能体系统：Obsidian 笔记库摄取 / 关联发现 / 检索问答，以 MCP Server 形式对外暴露"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    # --- 图编排 ---
+    "langgraph>=0.2.50",
+    "langchain>=0.3.0",
+    "langchain-core>=0.3.0",
+
+    # --- LLM 抽象（可切换 Ollama 本地 / API key 模型）---
+    "langchain-ollama>=0.2.0",
+    # API 模型按需启用，下方为占位依赖；当前 key 留空，启用时填入
+    "langchain-openai>=0.2.0",
+
+    # --- RAG / 向量检索（本地，支持 metadata 过滤 status=promoted）---
+    "chromadb>=0.5.0",
+    "langchain-chroma>=0.1.4",
+    "langchain-text-splitters>=0.2.0",  # MarkdownHeaderTextSplitter / RecursiveCharacterTextSplitter
+
+    # --- MCP Server（pin <2：2.0 移除了 FastMCP，1.x 才有 mcp.server.fastmcp）---
+    "mcp>=1.0.0,<2.0.0",
+
+    # --- 视频转文档：yt-dlp 获取字幕/音频 + whisper 转写 ---
+    # 参考 wdkns/bilibili-render-pdf skill 的三级 fallback 方法论
+    "yt-dlp>=2024.8.6",
+    # whisper：faster-whisper 轻量（避免拉起完整 torch）；可按需切换 openai-whisper
+    "faster-whisper>=1.0.3",
+
+    # --- 配置与工具 ---
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.3.0",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0",
+    "rich>=13.7.0",
+    "typer>=0.12.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "langgraph-cli[inmem]>=0.1.50",  # 提供 langgraph dev 本地调试服务
+    "ruff>=0.5.0",
+]
+
+[project.scripts]
+kb-debug = "scripts.debug_run:app"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["config*", "core*", "mcp_server*", "scripts*", "tests*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

@@ -1,0 +1,9 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "ingestion": "./core/graph.py:ingestion_graph",
+    "correlation": "./core/graph.py:correlation_graph",
+    "retrieval_qa": "./core/graph.py:retrieval_graph"
+  },
+  "env": ".env"
+}
