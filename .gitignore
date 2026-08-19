@@ -1,34 +1,26 @@
 # Python
 __pycache__/
-*.py[cod]
+*.pyc
+*.pyo
 *.egg-info/
-.eggs/
-build/
 dist/
-.venv/
-venv/
-.pytest_cache/
-.ruff_cache/
+build/
 
-# 环境变量（含占位 key，不提交）
+# 环境配置
 .env
 
-# 向量库本地持久化
+# 向量库 / Chroma 持久化
 .chroma_db/
 
-# LangGraph
-.langgraph/
+# 本地模型缓存（bge-m3 等，体积大不提交）
+models/
 
 # IDE
 .vscode/
 .idea/
 
-# OS
-.DS_Store
-Thumbs.db
-
-# 学习副本（项目结构镜像，不提交）
+# learning
 learning/
 
-# Workbuddy 工作记忆
+# IDE workspace
 .workbuddy/

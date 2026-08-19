@@ -54,9 +54,10 @@ async def retrieval_qa_node(state: KBState) -> dict:
     # 3. 拼 context block（带编号，便于引用）
     context_lines = []
     for i, c in enumerate(chunks, 1):
+        source_tag = c.get("source", "dense")
         context_lines.append(
             f"[{i}] 笔记: {c['path']}\n"
-            f"    (相似度 {c['score']:.3f}) {c['content']}"
+            f"    (来源 {source_tag}, 分数 {c['score']:.3f}) {c['content']}"
         )
     context_block = "\n\n".join(context_lines)
 

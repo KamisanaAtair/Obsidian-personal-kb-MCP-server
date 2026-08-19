@@ -42,14 +42,18 @@ async def format_note(
     source_type: str,
     source_ref: str,
     settings: Settings | None = None,
+    user_note: str = "",
 ) -> str:
     """把原始文本格式化为 Obsidian 规范的 Markdown 笔记草稿。
 
     Parameters
     ----------
     raw_content : 原始文本（视频转写 / 导入文本）
-    source_type : video_url | raw_text | note_path
-    source_ref  : 原始链接或文件标识
+    source_type : video_url | video_file | raw_text | note_path
+    source_ref  : 原始链接或文件标识（已从混合输入中提取的纯引用）
+    user_note   : 用户随视频引用一并输入的自然语言说明（如整理重点、意图）。
+                  用户输入几乎总是"自然语言 + 视频引用"的混合，说明部分
+                  是结构化笔记的重要上下文，不可丢弃。可为空串。
 
     Returns
     -------
@@ -60,7 +64,7 @@ async def format_note(
     # 1. 优先用 LLM 做内容结构化
     if not s.llm_is_placeholder:
         try:
-            note = await _format_with_llm(raw_content, source_type, source_ref, s)
+            note = await _format_with_llm(raw_content, source_type, source_ref, s, user_note)
             if note:
                 return note
         except Exception as e:  # noqa: BLE001
@@ -68,7 +72,7 @@ async def format_note(
 
     # 2. Fallback：基础 frontmatter 包装（LLM 占位符或调用失败时）
     logger.info("[obsidian_skill] 使用基础 frontmatter 包装（LLM 占位符或不可用）")
-    return _basic_wrap(raw_content, source_type, source_ref)
+    return _basic_wrap(raw_content, source_type, source_ref, user_note)
 
 
 async def _format_with_llm(
@@ -76,6 +80,7 @@ async def _format_with_llm(
     source_type: str,
     source_ref: str,
     settings: Settings,
+    user_note: str = "",
 ) -> Optional[str]:
     """用 LLM + prompt 把原始文本结构化为规范笔记。"""
     llm = get_llm("ingest", settings)
@@ -84,6 +89,7 @@ async def _format_with_llm(
         ("human", INGESTION_USER.format(
             source_type=source_type,
             source_ref=source_ref,
+            user_note=user_note or "（无）",
             raw_content=raw_content,
         )),
     ]
@@ -100,15 +106,20 @@ async def _format_with_llm(
     return content
 
 
-def _basic_wrap(raw_content: str, source_type: str, source_ref: str) -> str:
+def _basic_wrap(raw_content: str, source_type: str, source_ref: str, user_note: str = "") -> str:
     """基础 frontmatter 包装（LLM 不可用时的 fallback）。
 
     保留原文作为正文，生成最小可用 frontmatter。
     保证链路可验证，但笔记结构化程度低（待 LLM 接入后由 _format_with_llm 替代）。
+    用户自然语言说明（user_note）以"用户说明"小节保留在正文中，不丢弃。
     """
     today = date.today().isoformat()
     # 尝试从原文提取标题（首个 # 标题或首行）
     title = _extract_title(raw_content)
+
+    user_note_section = ""
+    if user_note:
+        user_note_section = f"## 用户说明\n\n{user_note}\n\n"
 
     return (
         "---\n"
@@ -121,6 +132,7 @@ def _basic_wrap(raw_content: str, source_type: str, source_ref: str) -> str:
         f"# {title}\n\n"
         "> ⚠️ 本笔记由基础包装生成（LLM 占位符模式），结构化程度低。\n"
         "> 接入真实 LLM 后将自动结构化为规范笔记。\n\n"
+        f"{user_note_section}"
         "## 原始内容\n\n"
         f"{raw_content}\n"
     )

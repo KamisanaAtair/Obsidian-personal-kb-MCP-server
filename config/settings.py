@@ -47,6 +47,15 @@ class Settings(BaseSettings):
     openai_correlation_model: str = "PLACEHOLDER_OPENAI_MODEL"
     openai_qa_model: str = "PLACEHOLDER_OPENAI_MODEL"
 
+    # ---- Embedding 独立路由 ----
+    # embedding 可独立于 LLM provider 配置：LLM 走 ollama/api，embedding 走 local（bge-m3）。
+    # local：本地 sentence-transformers 加载 BAAI/bge-m3（优先从魔搭社区下载）。
+    embed_provider: Literal["ollama", "api", "local"] = "local"
+    embed_model_name: str = "BAAI/bge-m3"
+    embed_model_source: Literal["modelscope", "huggingface"] = "modelscope"
+    embed_model_cache_dir: str = "models/bge-m3"  # 本地缓存目录（相对于项目根）
+    embed_device: str = "cpu"                      # cpu | cuda
+
     # ---- Obsidian Vault ----
     # vault_root 仅作 fallback：默认空，优先动态解析（见 vault_path property）。
     # 遵循 obsidian skill 规范 "Avoid hardcoded vault paths; prefer print-default / obsidian.json"。
@@ -77,6 +86,14 @@ class Settings(BaseSettings):
     correlation_top_k: int = 5
     correlation_min_score: float = 0.35
 
+    # ---- 混合检索（BM25 + 向量 + RRF 融合）----
+    # BM25 稀疏检索擅长精确关键词/术语/ID 匹配，向量 Dense 检索擅长语义相似，
+    # 两者互补。通过 RRF（Reciprocal Rank Fusion）融合排名，k=60 为业界经验常数。
+    hybrid_search_enabled: bool = True       # 关闭则退回纯向量检索
+    hybrid_bm25_weight: float = 0.5          # BM25 路权重（0=纯向量, 1=纯BM25, 0.5=等权）
+    hybrid_rrf_k: int = 60                   # RRF 平滑常数（越大各排名差异越小）
+    hybrid_candidate_multiplier: int = 3     # 每路取 top_k×multiplier 候选再融合截断
+
     # ---- 视频转文档（独立实现，参考 bilibili-render-pdf skill 三级 fallback 方法论）----
     # 注意：本系统不依赖任何 Host 的 skill；此处参考其"yt-dlp CC 字幕 → Whisper 转写"
     # 方法论在 core/tools/video_to_text.py 独立实现，产出纯文本（非 PDF）。
@@ -89,6 +106,15 @@ class Settings(BaseSettings):
     whisper_language: str = "zh"           # 转写语言
     whisper_device: str = "cpu"            # cpu | cuda
     whisper_compute_type: str = "int8"     # int8(cpu) | float16(gpu) | float32
+
+    # ---- 路径/URL 识别器（混合式：正则 + LLM fallback）----
+    # 两阶段 pipeline：Stage 1 正则快速匹配规范地址，Stage 2 LLM 处理歧义场景
+    # （路径含空格、地址不完整、多候选、格式模糊等）。
+    # LLM 占位符时自动降级为"Stage 1 结果 + needs_review=true"。
+    path_recognizer_llm_enabled: bool = True
+    path_recognizer_confidence_threshold: float = 0.7   # Stage 1 高置信度阈值，低于此值触发 LLM
+    path_recognizer_max_retries: int = 1               # LLM JSON 解析失败重试次数
+    path_recognizer_llm_timeout: float = 15.0          # LLM 调用超时（秒）
 
     # ---- Obsidian 整理（参考 obsidian-official-cli + yakitrak obsidian-cli）----
     # 本系统不依赖 Host 的 obsidian skill；在 core/tools/obsidian_cli.py 独立封装 CLI 适配层。
@@ -132,6 +158,12 @@ class Settings(BaseSettings):
     @property
     def chroma_path(self) -> Path:
         return Path(self.chroma_persist_dir)
+
+    @property
+    def embed_cache_path(self) -> Path:
+        """Embedding 模型本地缓存目录的绝对路径。"""
+        p = Path(self.embed_model_cache_dir)
+        return p if p.is_absolute() else Path.cwd() / p
 
     @property
     def llm_is_placeholder(self) -> bool:

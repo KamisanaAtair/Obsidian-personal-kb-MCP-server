@@ -40,7 +40,7 @@ def _setup_logging():
 
 
 @app.command()
-def ingest(source: str, source_type: str = typer.Option("", help="video_url|raw_text|note_path，留空自动判别")):
+def ingest(source: str, source_type: str = typer.Option("", help="video_url|video_file|raw_text|note_path，留空自动判别（支持自然语言+链接/路径混合输入）")):
     """摄取外部内容为 staged 草稿笔记。"""
     _setup_logging()
     from core.graph import ingestion_graph
@@ -119,6 +119,10 @@ def status():
         f"Vault: {s.vault_root}\n"
         f"Inbox: {s.inbox_path}\n"
         f"LLM provider: {s.llm_provider}\n"
+        f"Embed provider: {s.embed_provider}\n"
+        f"Embed model: {s.embed_model_name}\n"
+        f"Embed source: {s.embed_model_source}\n"
+        f"Embed cache: {s.embed_cache_path}\n"
         f"Stub 模式: {s.is_stub_mode}\n"
         f"视频转文档 MCP: {'已启用' if s.video_to_text_mcp_enabled else 'STUB（待接入）'}\n"
         f"Obsidian skill: {'已启用' if s.obsidian_skill_enabled else 'STUB（待接入）'}\n"

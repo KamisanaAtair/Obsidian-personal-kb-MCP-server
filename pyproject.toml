@@ -19,6 +19,13 @@ dependencies = [
     "chromadb>=0.5.0",
     "langchain-chroma>=0.1.4",
     "langchain-text-splitters>=0.2.0",  # MarkdownHeaderTextSplitter / RecursiveCharacterTextSplitter
+    "rank-bm25>=0.2.2",                # BM25 稀疏检索（混合检索的 sparse 通道）
+    "jieba>=0.42.1",                    # 中文分词（BM25 tokenization）
+
+    # --- 本地 Embedding（BAAI/bge-m3 via sentence-transformers）---
+    "langchain-huggingface>=0.1.0",     # LangChain HuggingFaceEmbeddings 适配
+    "sentence-transformers>=2.7.0",     # 本地模型推理
+    "modelscope>=1.18.0",              # 从魔搭社区下载模型（国内网络友好）
 
     # --- MCP Server（pin <2：2.0 移除了 FastMCP，1.x 才有 mcp.server.fastmcp）---
     "mcp>=1.0.0,<2.0.0",
@@ -55,11 +62,11 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["config*", "core*", "mcp_server*", "scripts*", "tests*"]
+include = ["config*", "core*", "mcp_server*", "scripts*"]
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-asyncio_mode = "auto"
+# 注：pytest 测试已剥离至独立测试仓库 D:\Project\kb-multiagent-testsuite（物理隔离）。
+# pytest.ini_options 已随 tests/ 一并移除，测试配置由外部测试仓库自带。
+# 外部测试通过 sys.path 注入本项目根目录直接调用 core/config/mcp_server 包。
 
 [tool.ruff]
 line-length = 100

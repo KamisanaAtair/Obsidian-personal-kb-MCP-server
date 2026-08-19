@@ -35,7 +35,9 @@ class KBState(TypedDict, total=False):
     user_input: str
 
     # ---- Ingestion Agent 写 ----
-    source_type: Optional[Literal["video_url", "note_path", "raw_text"]]
+    # video_url: 用户输入中含视频站链接；video_file: 含本地视频文件路径。
+    # 用户输入几乎总是"自然语言 + 视频引用"混合，由 ingestion 节点负责分离提取。
+    source_type: Optional[Literal["video_url", "video_file", "note_path", "raw_text"]]
     raw_content: Optional[str]          # Ingestion 的原始输入（转写文本 / 导入文本）
     processed_note: Optional[str]       # Ingestion 处理完的笔记内容（含 frontmatter）
     note_path: Optional[str]            # 落地后的笔记相对路径

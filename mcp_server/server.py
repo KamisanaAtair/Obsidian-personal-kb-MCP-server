@@ -35,15 +35,20 @@ mcp = FastMCP("personal-kb-multiagent")
 async def ingest_content(source: str, source_type: str = "") -> str:
     """摄取外部内容为 Obsidian 笔记草稿。
 
-    把视频链接或导入文本转成一篇 status=staged 的笔记，落地到 Inbox/ 目录。
+    把视频或导入文本转成一篇 status=staged 的笔记，落地到 Inbox/ 目录。
     该笔记需人工审核确认（在 Obsidian 中把 status 改为 promoted）后才可被检索。
 
     Parameters
     ----------
     source : str
-        视频链接，或待导入的文本内容。
+        用户输入。支持两种视频来源，且几乎总是与自然语言说明混合出现
+        （如"帮我转写这个视频 https://b23.tv/xxx，重点整理方法论"）：
+        - 自然语言 + 视频链接（Bilibili/YouTube 等支持站点）
+        - 自然语言 + 本地视频文件路径（mp4/mkv/mov 等格式，路径需存在）
+        - 纯文本内容
+        系统会自动从混合输入中提取视频引用并保留自然语言说明作为笔记上下文。
     source_type : str, optional
-        来源类型：video_url | raw_text | note_path。留空时自动判别。
+        来源类型：video_url | video_file | raw_text | note_path。留空时自动判别。
 
     Returns
     -------

@@ -78,10 +78,28 @@ def get_llm(role: Role, settings: Settings | None = None):
 
 
 def get_embeddings(settings: Settings | None = None):
-    """返回 embedding 模型（RAG 用），默认走 Ollama 本地。"""
-    s = settings or get_settings()
+    """返回 embedding 模型（RAG 用）。
 
-    if s.llm_provider == "ollama":
+    路由优先级：
+    1. ``embed_provider`` 显式配置（local / ollama / api）
+    2. fallback 到 ``llm_provider``（向后兼容）
+
+    - local  : 本地 BAAI/bge-m3（sentence-transformers，优先从魔搭社区下载）
+    - ollama : Ollama 本地 embedding（如 nomic-embed-text）
+    - api    : OpenAI 兼容 API embedding
+    """
+    s = settings or get_settings()
+    provider = s.embed_provider
+
+    # 向后兼容：embed_provider 未显式配置时 fallback 到 llm_provider
+    # （pydantic 默认值已是 "local"，仅当 .env 显式设了非 local 才走其他分支）
+
+    if provider == "local":
+        from core.tools.embeddings import get_local_embeddings
+
+        return get_local_embeddings(s)
+
+    if provider == "ollama":
         from langchain_ollama import OllamaEmbeddings  # type: ignore
 
         if s.ollama_embed_model.startswith("PLACEHOLDER"):
@@ -91,7 +109,7 @@ def get_embeddings(settings: Settings | None = None):
             )
         return OllamaEmbeddings(model=s.ollama_embed_model, base_url=s.ollama_base_url)
 
-    if s.llm_provider == "api":
+    if provider == "api":
         from langchain_openai import OpenAIEmbeddings  # type: ignore
 
         if s.openai_api_key.startswith("PLACEHOLDER"):
@@ -103,4 +121,4 @@ def get_embeddings(settings: Settings | None = None):
             model="PLACEHOLDER_EMBED_MODEL",
         )
 
-    raise ValueError(f"未知 LLM_PROVIDER: {s.llm_provider}")
+    raise ValueError(f"未知 embed_provider: {provider}")

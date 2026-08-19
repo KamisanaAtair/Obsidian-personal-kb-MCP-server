@@ -42,6 +42,17 @@ logger = logging.getLogger(__name__)
 _SUBTITLE_LANGS = "zh-Hans,zh-CN,zh,ai-zh,zh-Hant,en,en-US,en-GB"
 # 支持的视频站点关键字（快速判别视频链接）
 _VIDEO_HOSTS = ("bilibili.com", "b23.tv", "youtube.com", "youtu.be", "v.qq.com")
+# 本地视频文件扩展名（文件系统传入的判别依据）
+_VIDEO_FILE_EXTS = (
+    ".mp4", ".mkv", ".mov", ".avi", ".webm",
+    ".flv", ".ts", ".m4v", ".wmv", ".mpg", ".mpeg", ".3gp",
+)
+# 从"自然语言 + 链接"混合文本中提取 URL 的正则
+# 排除：空白、尖/圆/方括号、引号，以及 CJK 字符与全角标点（\u3000-\u9fff、\uff00-\uffef）
+# —— 否则中文逗号/句号会粘连在 URL 尾部
+_URL_RE = re.compile(r"https?://[^\s<>\"'()\[\]\u3000-\u9fff\uff00-\uffef]+", re.IGNORECASE)
+# URL 尾部可能粘连的标点（中英文句读）
+_URL_TRAILING_PUNCT = ".,;:!?，。；：！？）)】]》》”\""
 
 
 @dataclass
@@ -53,18 +64,63 @@ class TranscriptResult:
     srt_path: Optional[str] = None  # 原始 SRT 路径（可选保留）
 
 
+def extract_video_url(text: str) -> Optional[str]:
+    """从"自然语言 + 链接"混合文本中提取视频链接。
+
+    ⚠️ 关键设计前提：用户输入**几乎总是自然语言与链接的组合**
+    （如"帮我转写这个视频 https://b23.tv/xxx，重点整理方法论"），
+    纯链接输入并不存在。因此不能要求整段文本就是 URL，必须在文本中查找。
+
+    Returns
+    -------
+    首个命中支持站点的 URL（已去尾部标点）；无则 None。
+    """
+    for m in _URL_RE.finditer(text):
+        url = m.group(0).rstrip(_URL_TRAILING_PUNCT)
+        if url and any(h in url.lower() for h in _VIDEO_HOSTS):
+            return url
+    return None
+
+
+def extract_video_file(text: str) -> Optional[str]:
+    """从混合文本中提取本地视频文件路径（存在且扩展名为视频格式）。
+
+    判别标准（双条件，避免把普通文本里的词误判为文件）：
+    1. token 以视频扩展名结尾
+    2. 该路径在文件系统上真实存在
+
+    Returns
+    -------
+    本地视频文件路径；无则 None。
+    """
+    for token in text.split():
+        candidate = token.strip().strip("\"'`").rstrip(_URL_TRAILING_PUNCT)
+        if not candidate.lower().endswith(_VIDEO_FILE_EXTS):
+            continue
+        if Path(candidate).is_file():
+            return candidate
+    return None
+
+
 def is_video_url(text: str) -> bool:
-    """快速判别是否为视频链接。"""
-    lowered = text.strip().lower()
-    return lowered.startswith(("http://", "https://")) and any(h in lowered for h in _VIDEO_HOSTS)
+    """判别文本中**是否包含**视频链接（支持自然语言+链接的混合输入）。"""
+    return extract_video_url(text) is not None
 
 
-async def transcribe_video(video_url: str) -> str:
-    """把视频链接转写为纯文本。
+def is_video_file(text: str) -> bool:
+    """判别文本中**是否包含**本地视频文件路径。"""
+    return extract_video_file(text) is not None
+
+
+async def transcribe_video(video_ref: str) -> str:
+    """把视频（URL 或本地文件路径）转写为纯文本。
 
     Parameters
     ----------
-    video_url : 视频链接（Bilibili / YouTube 等 yt-dlp 支持的站点）
+    video_ref : 视频链接（yt-dlp 支持的站点）或本地视频文件路径。
+        为了健壮性：若传入的是"自然语言 + 链接/路径"的混合文本，
+        内部会先提取出真正的视频引用（URL 优先，其次本地文件），
+        绝不会把整段自然语言当 URL 传给 yt-dlp。
 
     Returns
     -------
@@ -72,14 +128,22 @@ async def transcribe_video(video_url: str) -> str:
     """
     s = get_settings()
 
+    # 容错提取：混合文本 → 纯引用（URL 优先于本地文件）
+    url = extract_video_url(video_ref)
+    local = extract_video_file(video_ref)
+    if url:
+        video_ref = url
+    elif local:
+        video_ref = local
+
     if not s.video_to_text_mcp_enabled:
         logger.warning(
             "[video_to_text] STUB 模式（VIDEO_TO_TEXT_MCP_ENABLED=false）。"
             "返回占位文本。在 .env 设为 true 启用真实 yt-dlp + whisper 转写。"
         )
-        return _stub_transcript(video_url)
+        return _stub_transcript(video_ref)
 
-    result = await _transcribe_real(video_url, s)
+    result = await _transcribe_real(video_ref, s)
     return result.text
 
 
@@ -87,29 +151,39 @@ async def transcribe_video(video_url: str) -> str:
 # 真实实现：三级 fallback（CC 字幕 → Whisper → 失败）
 # ---------------------------------------------------------------------------
 
-async def _transcribe_real(video_url: str, settings: Settings) -> TranscriptResult:
-    """真实转写：CC 字幕优先 → Whisper fallback。"""
-    _check_yt_dlp()
+async def _transcribe_real(video_ref: str, settings: Settings) -> TranscriptResult:
+    """真实转写。分两条路径：
+    - 本地视频文件：无 CC 字幕可下载，直接 ffmpeg 提音频 → Whisper
+    - 视频链接：CC 字幕优先 → Whisper fallback
+    """
+    is_local = Path(video_ref).is_file()
+    if is_local:
+        _check_input_exists(video_ref)
+    else:
+        _check_yt_dlp()
 
     with tempfile.TemporaryDirectory(prefix="kb_video_") as workdir:
         work = Path(workdir)
 
-        # 1. 优先尝试 CC 字幕（无需 ffmpeg）
-        result = await _try_cc_subtitles(video_url, work)
-        if result is not None and result.text.strip():
-            logger.info("[video_to_text] 命中 CC 字幕（source=%s）", result.source)
-            return result
+        if not is_local:
+            # 1a. URL 路径：优先尝试 CC 字幕（无需 ffmpeg）
+            result = await _try_cc_subtitles(video_ref, work)
+            if result is not None and result.text.strip():
+                logger.info("[video_to_text] 命中 CC 字幕（source=%s）", result.source)
+                return result
+            logger.info("[video_to_text] 无可用 CC 字幕，fallback 到 Whisper 转写")
+        else:
+            logger.info("[video_to_text] 本地视频文件，直接 Whisper 转写（无 CC 字幕级）")
 
-        # 2. fallback：提取音频 → Whisper 转写（需 ffmpeg）
-        logger.info("[video_to_text] 无可用 CC 字幕，fallback 到 Whisper 转写")
-        result = await _try_whisper_transcription(video_url, work, settings)
+        # 1b/2. 提取音频 → Whisper 转写（URL 走 yt-dlp，本地文件走 ffmpeg）
+        result = await _try_whisper_transcription(video_ref, work, settings)
         if result is not None and result.text.strip():
             logger.info("[video_to_text] Whisper 转写完成（source=%s）", result.source)
             return result
 
         # 3. 全部失败
         raise RuntimeError(
-            f"视频转写失败：既无 CC 字幕，Whisper 也未产出结果。URL={video_url}"
+            f"视频转写失败：既无 CC 字幕，Whisper 也未产出结果。源={video_ref}"
         )
 
 
@@ -145,9 +219,12 @@ async def _try_cc_subtitles(video_url: str, work: Path) -> Optional[TranscriptRe
 
 
 async def _try_whisper_transcription(
-    video_url: str, work: Path, settings: Settings
+    video_source: str, work: Path, settings: Settings
 ) -> Optional[TranscriptResult]:
-    """第 2 级：提取音频 → Whisper 转写。"""
+    """第 2 级：提取音频 → Whisper 转写。
+
+    video_source 可为视频 URL（yt-dlp 提音频）或本地文件（ffmpeg 直接提音频）。
+    """
     if not _has_ffmpeg():
         logger.error(
             "[video_to_text] ffmpeg 不在 PATH，无法提取音频做 Whisper 转写。"
@@ -155,17 +232,27 @@ async def _try_whisper_transcription(
         )
         return None
 
-    audio_template = str(work / "audio.%(ext)s")
-    cmd = [
-        "yt-dlp",
-        "-x",
-        "--audio-format", "wav",
-        "--audio-quality", "0",
-        "-o", audio_template,
-        "--no-warnings",
-        "--no-playlist",
-        video_url,
-    ]
+    if Path(video_source).is_file():
+        # 本地文件：ffmpeg 直接提取音频（yt-dlp 不适用于本地文件）
+        audio_out = str(work / "audio.wav")
+        cmd = [
+            "ffmpeg", "-y", "-i", video_source,
+            "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+            audio_out,
+        ]
+    else:
+        # URL：yt-dlp 提取音频
+        audio_template = str(work / "audio.%(ext)s")
+        cmd = [
+            "yt-dlp",
+            "-x",
+            "--audio-format", "wav",
+            "--audio-quality", "0",
+            "-o", audio_template,
+            "--no-warnings",
+            "--no-playlist",
+            video_source,
+        ]
     logger.debug("[video_to_text] 提取音频: %s", " ".join(cmd))
     await _run_async(cmd)
 
@@ -298,6 +385,12 @@ def _check_yt_dlp() -> None:
         )
 
 
+def _check_input_exists(video_ref: str) -> None:
+    """本地文件输入校验：文件不存在时给出明确错误。"""
+    if not Path(video_ref).is_file():
+        raise RuntimeError(f"本地视频文件不存在: {video_ref}")
+
+
 def _has_ffmpeg() -> bool:
     return shutil.which("ffmpeg") is not None
 
@@ -325,10 +418,10 @@ async def _run_async(cmd: list[str]) -> subprocess.CompletedProcess:
 # Stub（占位，用于无依赖环境调试）
 # ---------------------------------------------------------------------------
 
-def _stub_transcript(video_url: str) -> str:
+def _stub_transcript(video_ref: str) -> str:
     return (
         f"[STUB 视频转写占位输出]\n"
-        f"源视频: {video_url}\n"
+        f"源视频: {video_ref}\n"
         f"（此处应为真实转写文本。在 .env 设置 VIDEO_TO_TEXT_MCP_ENABLED=true，"
         f"并确保 yt-dlp / ffmpeg / faster-whisper 已安装，即可启用真实转写：\n"
         f"  1. 优先下载平台 CC 字幕（zh-Hans/zh-CN/zh/ai-zh）\n"

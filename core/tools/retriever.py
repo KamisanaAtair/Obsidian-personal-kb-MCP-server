@@ -180,6 +180,9 @@ def index_vault(settings=None) -> int:
         total_chunks += len(ids)
 
     _save_manifest(_manifest_path(s), manifest)
+    # 索引变更后失效 BM25 缓存，下次检索时重建
+    from core.tools.hybrid_search import invalidate_bm25_cache
+    invalidate_bm25_cache(s)
     logger.info(
         "[retriever] 全量索引完成：%d 篇 promoted 笔记 / %d 个块", total_notes, total_chunks
     )
@@ -275,6 +278,9 @@ def _ensure_index_fresh_impl(s: Settings) -> dict:
             logger.debug("[retriever] 增量删除笔记: %s", rel_path)
 
     _save_manifest(manifest_path, prev)
+    # 索引变更后失效 BM25 缓存，下次检索时重建
+    from core.tools.hybrid_search import invalidate_bm25_cache
+    invalidate_bm25_cache(s)
 
     total = len(current)
     logger.info(
@@ -303,17 +309,29 @@ def retrieve(
 
     信任闸门：metadata filter status=promoted 强制过滤，
     staged 笔记即使被误索引也不会被召回。
+
+    混合检索（settings.hybrid_search_enabled=True 时启用）：
+    BM25 稀疏 + 向量 Dense 并行 → RRF 融合，兼顾关键词精度与语义相似。
+    关闭时退回纯向量检索。
     """
     s = settings or get_settings()
-
+    k = top_k or s.rag_top_k
     embeddings = get_embeddings(s)
+
+    # 混合检索路径
+    if s.hybrid_search_enabled:
+        from core.tools.hybrid_search import hybrid_retrieve
+        try:
+            return hybrid_retrieve(query, top_k=k, settings=s, embeddings=embeddings)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[retriever] 混合检索失败，降级为纯向量检索: %s", e)
+            # 落入下方纯向量检索（复用已构造的 embeddings）
     vectorstore = Chroma(
         collection_name=s.rag_collection_name,
         embedding_function=embeddings,
         persist_directory=str(s.chroma_path),
     )
 
-    k = top_k or s.rag_top_k
     # 关键：metadata filter 物理隔离 staged
     results = vectorstore.similarity_search_with_score(
         query,
