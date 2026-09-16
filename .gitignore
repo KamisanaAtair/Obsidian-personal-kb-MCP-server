@@ -24,3 +24,16 @@ learning/
 
 # IDE workspace
 .workbuddy/
+
+# Local development
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Local installation verification scratch files
+local-validation/
+
+# Machine-specific installation records and validation logs
+/docs/WORKBUDDY_*
+/docs/*-output.txt
+/docs/artifact-check.txt

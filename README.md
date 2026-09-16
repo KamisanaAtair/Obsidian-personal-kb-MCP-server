@@ -1,167 +1,68 @@
-# Personal KB Multi-Agent
+# Personal KB — host-delegated
 
-基于 LangGraph 的个人知识库多智能体系统，以 MCP Server 形式对外暴露三个业务流程级工具，核心安全机制是 frontmatter `status` 字段（`staged`/`promoted`）构成的**信任闸门**。
+把 Obsidian 笔记库接入 MCP Host 的个人知识库服务，版本 **0.2.0**。本版将笔记整理、关联理由和答案生成交给 Host 的对话模型；服务端保留原文获取、本地检索、来源校验和草稿落盘。
 
----
+“转嫁成本”指服务端不再另行调用生成式 LLM；生成仍消耗 Host 原有额度和上下文，本地 bge-m3、视频 ASR、模型下载和磁盘也仍有成本。本服务不调用 MCP sampling。
 
-## 功能概览
+## 四个工具
 
-| MCP 工具 | 功能 |
-|---|---|
-| `ingest_content` | 摄取外部内容（文本/视频链接）→ 生成 `staged` 草稿笔记 |
-| `trigger_correlation` | 对 `promoted` 笔记做语义关联发现（只读） |
-| `query_kb` | 基于 `promoted` 笔记的 RAG 检索问答 + 引用来源 |
+| 工具 | 服务端返回 | Host 下一步 |
+|---|---|---|
+| `ingest_content_prepare(user_input)` | 原文、`prepare_id`、`prompt_for_host` | 用自身模型生成完整 Markdown |
+| `ingest_content_finalize(prepare_id, note_content)` | `note_path` 或 `error` | 告知用户草稿位置，等待人工审核 |
+| `trigger_correlation(note_path)` | 候选片段和 `prompt_for_host` | 判断关联理由，直接展示 |
+| `query_kb(question)` | 检索片段、`prompt_for_host`、`no_hit_message` | 生成带引用的答案，或展示无命中文案 |
 
----
+草稿一律写入 `Inbox/`，强制 `status: staged`。用户在 Obsidian 审核并手动改为 `promoted` 后才参与检索；MCP 不提供提升状态的工具。
 
-## 核心设计：信任闸门
+## 本地启动
 
-```
-staged   ──[不可被检索]──►  Retrieval / Correlation 物理隔离
-promoted ──[可被检索]──►   仅 promoted 笔记进入向量库召回
-改 status ──[只能人工]──►  任何代码路径 / MCP 工具均不提供改 status 入口
-```
-
-- AI 生成的笔记强制标记为 `staged`，不可被检索
-- 人工在 Obsidian 中审核后改为 `promoted`，方可进入知识库
-- 代码层多处兜底，确保闸门不被绕过
-
----
-
-## 技术栈
-
-| 领域 | 选型 |
-|---|---|
-| 图编排 | LangGraph ≥ 0.2.50 + LangChain ≥ 0.3.0 |
-| LLM | Ollama 本地（默认）/ OpenAI API |
-| 向量库 | Chroma ≥ 0.5.0（metadata 过滤隔离 staged） |
-| Embedding | BAAI/bge-m3（本地 sentence-transformers） |
-| 混合检索 | Chroma 向量检索 + BM25 稀疏检索（RRF 融合） |
-| MCP Server | mcp 1.x（FastMCP） |
-| 视频转文本 | yt-dlp + faster-whisper（CC 字幕 → Whisper fallback） |
-| 配置 | pydantic-settings + python-dotenv |
-| Python | ≥ 3.11 |
-
----
-
-## 快速开始
-
-### 1. 安装
+克隆 **`codex/host-delegated`** 分支，或解压本版源码包并进入源码目录。需要 **Python 3.11 或更高版本**：
 
 ```bash
-git clone https://github.com/KamisanaAtair/Obsidian-personal-kb-MCP-server.git
+git clone --branch codex/host-delegated https://github.com/KamisanaAtair/Obsidian-personal-kb-MCP-server.git
 cd Obsidian-personal-kb-MCP-server
-pip install -e ".[dev]"
 ```
 
-### 2. 配置环境变量
-
 ```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
 cp .env.example .env
-# 编辑 .env，至少配置 VAULT_ROOT 指向你的 Obsidian Vault 目录
 ```
 
-### 3. 下载 Embedding 模型（首次使用）
+编辑 `.env`，把 `VAULT_ROOT` 设为实际 Vault 的**绝对路径**，保留 `VAULT_AUTODISCOVER=false`。Windows PowerShell 激活命令为 `.venv/Scripts/Activate.ps1`。
 
 ```bash
+# 首次使用检索前下载本地 embedding 模型
 python scripts/download_embed_model.py
-```
 
-### 4. 启动 MCP Server
+# 查看配置；此命令不加载 embedding 模型
+python scripts/debug_run.py status
 
-```bash
+# stdio MCP 服务，由 Host 启动或用于协议调试
 python -m mcp_server.server
 ```
 
-### 5. 调试（可选）
+默认 `VIDEO_TO_TEXT_MCP_ENABLED=false`，视频返回带 STUB 标记的示例转写。真实视频转写须启用此开关并安装 ffmpeg；纯文本摄取不需要启用它。
+
+Host 必须在**同一个服务进程**内完成 prepare → 生成 → finalize；`prepare_id` 默认 60 分钟有效，重启即失效。具体连接参数、交互示例及调试命令见 [Host 使用说明](docs/HOST_USAGE.md)。
+
+WorkBuddy 用户可按 [接入指南](docs/workbuddy.md) 合并 [通用 MCP 配置示例](examples/workbuddy.mcp.json)，其中包含服务 description 和四工具工作约定。示例中的绝对路径须先替换。
+
+## 验证与设计
 
 ```bash
-# 查看配置与 Vault 状态
-python scripts/debug_run.py status
-
-# 摄取内容
-python scripts/debug_run.py ingest "https://www.bilibili.com/video/BVxxxxxx"
-
-# 关联发现
-python scripts/debug_run.py correlate "path/to/note.md"
-
-# 检索问答
-python scripts/debug_run.py query "什么是 RAG？"
-
-# 全量重建索引
-python scripts/debug_run.py index
+pip install pytest pytest-asyncio
+python -m pytest -q
 ```
 
----
+- [实现结果与验证范围](docs/IMPLEMENTATION_REPORT.md)
+- [架构与项目目标](PROJECT_README.md)、[开发上下文](PROJECT_CONTEXT.md)、[目录说明](struct.md)
+- [设计决策与计划偏差](docs/DECISIONS.md)
 
-## 项目结构
+已通过 28 项回归测试、真实 bge-m3 检索和本地合成视频的 Whisper 转写验证。WorkBuddy 已读取本机配置，但原生首次信任及 Host 完整生成循环尚未验证；详细环境和边界见实现报告。
 
-```
-├── config/              # 配置层：全局设置 + prompt 模板
-├── core/
-│   ├── nodes/           # 图节点实现（ingestion / correlation / retrieval_qa）
-│   ├── subgraphs/       # 子图定义（每个对应一个 MCP 工具）
-│   ├── tools/           # 内部工具集（LLM工厂 / RAG检索器 / Vault读写 等）
-│   ├── graph.py         # 图注册表
-│   └── state.py         # KBState 状态定义
-├── mcp_server/          # MCP Server 适配层（薄适配器，无业务逻辑）
-├── scripts/             # 调试脚本
-├── .env.example         # 环境变量示例
-├── pyproject.toml       # 依赖与构建配置
-└── langgraph.json       # LangGraph 图注册表
-```
+## 上游与许可证
 
----
-
-## 架构分层
-
-```
-config/           ← 所有模块引用
-  ↑
-core/tools/       ← 内部工具（LLM / 检索器 / Vault IO）
-  ↑
-core/nodes/       ← 图节点（业务逻辑）
-  ↑
-core/subgraphs/   ← 子图（流程编排）
-  ↑
-core/graph.py     ← 导出
-  ├──→ mcp_server/   （MCP 适配，薄调用）
-  └──→ scripts/      （调试入口）
-```
-
-**核心原则**：`core/` 与触发方式完全解耦，MCP Server 只做参数解析 → 调子图 → 格式化返回。
-
----
-
-## 笔记生命周期
-
-```
-外部内容 ──► Ingestion Agent ──► staged 草稿（Inbox/）
-                                      │
-                                 人工审核（Obsidian）
-                                      │
-                                      ▼
-                                 promoted 笔记
-                                      │
-                          ┌───────────┴───────────┐
-                          ▼                       ▼
-                   Correlation Agent        Retrieval/QA Agent
-                   （语义关联发现）          （RAG 检索问答）
-```
-
----
-
-## 优雅降级
-
-每个外部依赖都有降级路径：
-
-- **LLM 不可用** → 相似度直出 / 基础 frontmatter 包装
-- **Obsidian CLI 不可用** → 文件系统 fallback
-- **视频转写不可用** → stub 占位文本
-- **Vault 路径解析失败** → `.env` fallback
-
----
-
-## 许可证
-
-[CC BY-NC-SA 4.0](LICENSE) — 免费使用、要求署名、禁止商用、相同方式共享。
+基于 [KamisanaAtair / Obsidian-personal-kb-MCP-server](https://github.com/KamisanaAtair/Obsidian-personal-kb-MCP-server)，改造基线为 `9ebb73669912eb99f2edee27d2aebeebfaf88f6a`。保留上游署名与 [LICENSE](LICENSE)（文件载明 PolyForm Noncommercial License 1.0.0，Copyright © 2026 XvAo）。本次改造称为 **host-delegated**；项目既有“v2”专指未来的图谱感知检索。

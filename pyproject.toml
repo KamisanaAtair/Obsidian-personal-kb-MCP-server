@@ -1,7 +1,7 @@
 [project]
 name = "personal-kb-multiagent"
-version = "0.1.0"
-description = "个人知识库多智能体系统：Obsidian 笔记库摄取 / 关联发现 / 检索问答，以 MCP Server 形式对外暴露"
+version = "0.2.0"
+description = "host-delegated 个人知识库：本地检索与草稿落盘，生成工作交给 MCP Host"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -9,11 +9,6 @@ dependencies = [
     "langgraph>=0.2.50",
     "langchain>=0.3.0",
     "langchain-core>=0.3.0",
-
-    # --- LLM 抽象（可切换 Ollama 本地 / API key 模型）---
-    "langchain-ollama>=0.2.0",
-    # API 模型按需启用，下方为占位依赖；当前 key 留空，启用时填入
-    "langchain-openai>=0.2.0",
 
     # --- RAG / 向量检索（本地，支持 metadata 过滤 status=promoted）---
     "chromadb>=0.5.0",
@@ -64,9 +59,9 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 include = ["config*", "core*", "mcp_server*", "scripts*"]
 
-# 注：pytest 测试已剥离至独立测试仓库 D:\Project\kb-multiagent-testsuite（物理隔离）。
-# pytest.ini_options 已随 tests/ 一并移除，测试配置由外部测试仓库自带。
-# 外部测试通过 sys.path 注入本项目根目录直接调用 core/config/mcp_server 包。
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 100

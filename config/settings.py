@@ -1,14 +1,4 @@
-"""集中配置：从环境变量加载，LLM API key 等暂用占位符。
-
-设计要点
---------
-1. LLM 路由：各 Agent 可独立配置模型（Ollama 本地 / API key 模型），
-   默认走 Ollama。真实 key 后续填入 .env，当前留占位符。
-2. 外部依赖（视频转文档 MCP / Obsidian skill）：以 ENABLED 开关控制，
-   框架阶段关闭，走 stub 实现；待用户提供代码/配置后开启。
-3. 信任闸门：status 字段（staged/promoted）在配置层固化取值，
-   retriever 仅检索 promoted——靠 metadata 过滤物理隔离。
-"""
+"""host-delegated 配置：生成工作交给 Host，本服务保留本地检索和转写。"""
 
 from __future__ import annotations
 
@@ -30,27 +20,8 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # ---- LLM 路由 ----
-    # ollama（默认本地） / api（API key 模型，占位符）
-    llm_provider: Literal["ollama", "api"] = "ollama"
-
-    ollama_base_url: str = "http://localhost:11434"
-    ollama_ingest_model: str = "PLACEHOLDER_OLLAMA_MODEL"
-    ollama_correlation_model: str = "PLACEHOLDER_OLLAMA_MODEL"
-    ollama_qa_model: str = "PLACEHOLDER_OLLAMA_MODEL"
-    ollama_embed_model: str = "PLACEHOLDER_EMBED_MODEL"
-
-    # API key 模型（占位符，后续替换为真实 key）
-    openai_api_key: str = "PLACEHOLDER_OPENAI_API_KEY"
-    openai_base_url: str = "PLACEHOLDER_OPENAI_BASE_URL"
-    openai_ingest_model: str = "PLACEHOLDER_OPENAI_MODEL"
-    openai_correlation_model: str = "PLACEHOLDER_OPENAI_MODEL"
-    openai_qa_model: str = "PLACEHOLDER_OPENAI_MODEL"
-
-    # ---- Embedding 独立路由 ----
-    # embedding 可独立于 LLM provider 配置：LLM 走 ollama/api，embedding 走 local（bge-m3）。
-    # local：本地 sentence-transformers 加载 BAAI/bge-m3（优先从魔搭社区下载）。
-    embed_provider: Literal["ollama", "api", "local"] = "local"
+    # ---- 本地 Embedding（生成工作由 Host 执行）----
+    embed_provider: Literal["local"] = "local"
     embed_model_name: str = "BAAI/bge-m3"
     embed_model_source: Literal["modelscope", "huggingface"] = "modelscope"
     embed_model_cache_dir: str = "models/bge-m3"  # 本地缓存目录（相对于项目根）
@@ -107,14 +78,12 @@ class Settings(BaseSettings):
     whisper_device: str = "cpu"            # cpu | cuda
     whisper_compute_type: str = "int8"     # int8(cpu) | float16(gpu) | float32
 
-    # ---- 路径/URL 识别器（混合式：正则 + LLM fallback）----
-    # 两阶段 pipeline：Stage 1 正则快速匹配规范地址，Stage 2 LLM 处理歧义场景
-    # （路径含空格、地址不完整、多候选、格式模糊等）。
-    # LLM 占位符时自动降级为"Stage 1 结果 + needs_review=true"。
-    path_recognizer_llm_enabled: bool = True
-    path_recognizer_confidence_threshold: float = 0.7   # Stage 1 高置信度阈值，低于此值触发 LLM
-    path_recognizer_max_retries: int = 1               # LLM JSON 解析失败重试次数
-    path_recognizer_llm_timeout: float = 15.0          # LLM 调用超时（秒）
+    # ---- 确定性路径/URL 识别 ----
+    # 歧义候选由 needs_review 标记；服务端不调用模型消歧。
+    path_recognizer_confidence_threshold: float = 0.7
+
+    # ---- prepare/finalize 进程内会话 ----
+    ingest_session_ttl_minutes: int = Field(default=60, ge=1)
 
     # ---- Obsidian 整理（参考 obsidian-official-cli + yakitrak obsidian-cli）----
     # 本系统不依赖 Host 的 obsidian skill；在 core/tools/obsidian_cli.py 独立封装 CLI 适配层。
@@ -166,23 +135,9 @@ class Settings(BaseSettings):
         return p if p.is_absolute() else Path.cwd() / p
 
     @property
-    def llm_is_placeholder(self) -> bool:
-        """LLM 是否仍为占位符（不可真实调用）。"""
-        if self.llm_provider == "ollama":
-            return self.ollama_ingest_model.startswith("PLACEHOLDER")
-        return self.openai_api_key.startswith("PLACEHOLDER")
-
-    @property
     def is_stub_mode(self) -> bool:
-        """是否处于完全占位模式（视频转写 + Obsidian CLI + LLM 均未真实启用）。
-
-        仅用于日志提示，不影响核心逻辑。各能力独立判断可用性并优雅降级。
-        """
-        return (
-            not self.video_to_text_mcp_enabled
-            and not self.obsidian_skill_enabled
-            and self.llm_is_placeholder
-        )
+        """视频使用 stub 且 Obsidian CLI 未启用；与 Host 的生成能力无关。"""
+        return not self.video_to_text_mcp_enabled and not self.obsidian_skill_enabled
 
 
 @lru_cache

@@ -1,48 +1,18 @@
-"""混合式文件路径与 URL 识别系统 —— 正则快速匹配 + LLM 歧义兜底。
+"""确定性文件路径与 URL 识别：正则匹配、归一化和歧义标记。
 
-设计思路
---------
-两阶段 pipeline：
-
-**Stage 1（正则快速匹配）**：处理简单、规范的地址。
-  - 含完整协议头的 URL（http/https/file/obsidian）
-  - 无空格的 Windows 绝对路径（D:\\... / C:/...）
-  - UNC 路径（\\\\server\\share\\...）
-  - Unix 绝对路径（/home/...）
-  正则匹配后做尾部标点清理与归一化，产出高置信度结果。
-
-**Stage 2（LLM fallback）**：处理歧义或非规范场景。
-  - 路径含空格（token 边界模糊）
-  - 地址不完整（裸域名缺协议头、路径缺盘符/根）
-  - 格式模糊（正则部分匹配、CJK 标点粘连）
-  - 多候选 URL/路径（需消歧哪个是主引用）
-  - 正则无匹配但启发式检测到路径/URL 线索
-
-LLM 输出用于机机交互，格式必须固定：
-  - Few-shot 示例提供典型输入输出范式（在 config/prompts.py）
-  - JSON Schema 强制返回统一字段
-  - 枚举允许值 + 长度限制 + 格式校验杜绝自由文本
-  - 解析失败时重试一次，再失败则兜底回 Stage 1 结果
-
-与现有模块的关系
-----------------
-- ``core/tools/video_to_text.py`` 的 ``extract_video_url`` / ``extract_video_file``
-  是**视频专用**提取器（只识别视频站链接/视频扩展名）。
-- 本模块是**通用**路径/URL 识别器，覆盖所有 scheme 的 URL 与所有平台路径，
-  可作为 ingestion 节点来源判别的统一入口（当前不破坏已有 video_to_text 调用链）。
-- 遵循多 Host 通用原则：不依赖任何 Host skill，core/tools/ 独立实现。
+host-delegated 移除原 Stage 2 的生成式模型兜底。规范的 URL 与路径继续通过
+Stage 1 正则提取；多候选、裸域名、残缺地址等保留 needs_review 提示，由调用方
+复核。recognize/extract_primary/extract_primary_sync 接口继续兼容已有调用方。
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from config.prompts import PATH_URL_SYSTEM, PATH_URL_USER
 from config.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
@@ -62,7 +32,7 @@ class RecognizedRef:
     scheme: str              # "https" | "http" | "file" | "obsidian" | "none"
     confidence: float        # 0.0 - 1.0
     needs_review: bool       # 是否需人工复核
-    stage: str = "regex"     # "regex" | "llm" | "fallback" —— 产出此结果的阶段
+    stage: str = "regex"     # "regex" | "fallback" —— 产出此结果的阶段
     reason: str = ""         # 置信度/歧义说明
 
 
@@ -72,7 +42,7 @@ class RecognitionResult:
 
     refs: list[RecognizedRef] = field(default_factory=list)
     primary: Optional[RecognizedRef] = None   # 置信度最高的引用
-    used_llm: bool = False                    # 是否触发了 Stage 2
+    used_llm: bool = False                    # 兼容字段；host-delegated 恒为 False
     overall_confidence: float = 0.0
 
 
@@ -101,7 +71,7 @@ _UNC_PATH_RE = re.compile(r"\\\\[^\s\"'()\[\]<>{}|*?]+")
 # bilibili.com/video 中的 /video 误匹配为 Unix 路径）
 _UNIX_PATH_RE = re.compile(r"(?<![A-Za-z0-9.])/(?:[^\s\"'()\[\]<>{}]+)/[^\s\"'()\[\]<>{}]*")
 
-# 裸域名（无协议头）：xxx.yy/zzz —— 固有歧义，低置信度，触发 LLM
+# 裸域名（无协议头）：xxx.yy/zzz —— 固有歧义，低置信度，需复核
 _BARE_DOMAIN_RE = re.compile(
     r"(?<![\w.-])(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?::\d+)?(?:/[^\s\"'()\[\]<>{}]*)?",
     re.IGNORECASE,
@@ -183,7 +153,7 @@ def _has_file_extension(path: str) -> bool:
 
 
 def _looks_like_clean_path(raw: str) -> bool:
-    """判断正则匹配到的路径是否"干净"（无需 LLM）。
+    """判断正则匹配到的路径是否"干净"（无需歧义复核）。
 
     判据：
     1. 剥离尾部标点后仍以文件扩展名结尾 → 干净
@@ -263,7 +233,7 @@ def stage1_regex(text: str) -> list[RecognizedRef]:
     2. UNC 路径
     3. Windows 绝对路径
     4. Unix 绝对路径
-    5. 裸域名（低置信度，通常触发 LLM）
+    5. 裸域名（低置信度，通常需复核）
     """
     refs: list[RecognizedRef] = []
     consumed_spans: list[tuple[int, int]] = []
@@ -299,7 +269,7 @@ def stage1_regex(text: str) -> list[RecognizedRef]:
 
 
 # ===========================================================================
-# Stage 切换判定
+# 歧义复核判定
 # ===========================================================================
 
 
@@ -330,7 +300,7 @@ def _has_heuristic_signal(text: str) -> bool:
 
 
 def _has_ambiguity_markers(text: str, ref: RecognizedRef) -> bool:
-    """检测单条结果是否带有歧义标记（即使置信度达标也需 LLM）。"""
+    """检测单条结果是否带有歧义标记（即使置信度达标也需复核）。"""
     raw = ref.raw_text
     # 路径含空格且未引号包裹 → 边界模糊
     if ref.kind == "file_path" and " " in raw:
@@ -347,16 +317,16 @@ def _has_ambiguity_markers(text: str, ref: RecognizedRef) -> bool:
     return False
 
 
-def _decide_llm(
+def _decide_review(
     text: str,
     stage1_refs: list[RecognizedRef],
     threshold: float,
 ) -> tuple[bool, str]:
-    """Stage 1 → Stage 2 切换判定。
+    """判断正则结果是否需要歧义复核。
 
     Returns
     -------
-    (need_llm, reason)
+    (needs_review, reason)
     """
     # 1. 无正则匹配但启发式检测到线索
     if not stage1_refs:
@@ -366,7 +336,7 @@ def _decide_llm(
 
     # 2. 多候选 → 需消歧
     if len(stage1_refs) > 1:
-        return True, f"存在 {len(stage1_refs)} 个候选，需 LLM 消歧"
+        return True, f"存在 {len(stage1_refs)} 个候选，需复核主引用"
 
     # 3. 单候选但置信度低于阈值
     ref = stage1_refs[0]
@@ -378,179 +348,6 @@ def _decide_llm(
         return True, "存在歧义标记（路径含空格/裸域名/CJK 粘连）"
 
     return False, ""
-
-
-# ===========================================================================
-# Stage 2：LLM fallback
-# ===========================================================================
-
-# JSON Schema 描述（用于文档与校验参考）
-REF_JSON_SCHEMA = {
-    "raw_text": {"type": "str", "max": 2000, "required": True},
-    "kind": {"type": "enum", "values": ["url", "file_path", "unknown"]},
-    "normalized": {"type": "str", "max": 2000, "required": True},
-    "scheme": {"type": "enum", "values": ["https", "http", "file", "obsidian", "none"]},
-    "confidence": {"type": "float", "min": 0.0, "max": 1.0},
-    "needs_review": {"type": "bool"},
-    "reason": {"type": "str", "max": 300},
-}
-
-_VALID_KINDS = {"url", "file_path", "unknown"}
-_VALID_SCHEMES = {"https", "http", "file", "obsidian", "none"}
-
-
-def _extract_json(raw: str) -> Optional[dict]:
-    """从 LLM 原始输出中提取 JSON 对象（容忍 markdown 代码块包裹）。"""
-    text = raw.strip()
-    # 去除可能的 markdown 代码块包裹
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*", "", text)
-        text = re.sub(r"\s*```$", "", text)
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        # 尝试提取首个 { 到末尾 } 的子串
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end > start:
-            try:
-                return json.loads(text[start : end + 1])
-            except json.JSONDecodeError:
-                return None
-    return None
-
-
-def _clamp_confidence(v) -> float:
-    """将 confidence 钳制到 [0.0, 1.0]。"""
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return 0.0
-    return max(0.0, min(1.0, round(f, 2)))
-
-
-def _validate_ref_dict(d: dict) -> RecognizedRef:
-    """校验并构建单条 RecognizedRef（容错：非法值降级为 unknown + needs_review）。"""
-    raw_text = str(d.get("raw_text", ""))[:2000]
-    kind = str(d.get("kind", "unknown")).lower()
-    if kind not in _VALID_KINDS:
-        kind = "unknown"
-    normalized = str(d.get("normalized", raw_text))[:2000]
-    scheme = str(d.get("scheme", "none")).lower()
-    if scheme not in _VALID_SCHEMES:
-        scheme = "none"
-    confidence = _clamp_confidence(d.get("confidence", 0.0))
-    needs_review = bool(d.get("needs_review", True))
-    reason = str(d.get("reason", ""))[:300]
-    # 降级标记：若 kind/scheme 被修正过，强制 needs_review
-    if kind == "unknown" and raw_text:
-        needs_review = True
-    return RecognizedRef(
-        raw_text=raw_text,
-        kind=kind,
-        normalized=normalized,
-        scheme=scheme,
-        confidence=confidence,
-        needs_review=needs_review,
-        stage="llm",
-        reason=reason,
-    )
-
-
-def _build_stage1_hint(refs: list[RecognizedRef]) -> str:
-    """构建传给 LLM 的 Stage 1 候选提示（若无候选则空串）。"""
-    if not refs:
-        return ""
-    lines = ["Stage 1 正则已识别以下候选（可能不完整或有歧义，请综合判断）："]
-    for i, r in enumerate(refs, 1):
-        lines.append(
-            f"  [{i}] raw={r.raw_text!r} kind={r.kind} "
-            f"normalized={r.normalized!r} conf={r.confidence:.2f}"
-        )
-    return "\n".join(lines)
-
-
-async def _call_llm_with_retry(
-    text: str,
-    stage1_refs: list[RecognizedRef],
-    settings: Settings,
-) -> Optional[list[dict]]:
-    """调用 LLM 并解析 JSON，失败时重试一次。
-
-    Returns
-    -------
-    parsed dicts list, or None if all retries fail.
-    """
-    from core.tools.llm import get_llm
-
-    llm = get_llm("ingest", settings)
-    hint = _build_stage1_hint(stage1_refs)
-    user_msg = PATH_URL_USER.format(text=text, stage1_hint=hint)
-
-    for attempt in range(settings.path_recognizer_max_retries + 1):
-        try:
-            resp = await llm.ainvoke(
-                [("system", PATH_URL_SYSTEM), ("human", user_msg)]
-            )
-            raw = resp.content if hasattr(resp, "content") else str(resp)
-            parsed = _extract_json(raw)
-            if parsed is None:
-                logger.warning(
-                    "[path_recognizer] LLM 输出 JSON 解析失败 (attempt %d): %s",
-                    attempt + 1,
-                    raw[:200],
-                )
-                continue
-            refs_data = parsed.get("refs", [])
-            if not isinstance(refs_data, list):
-                refs_data = []
-            return refs_data
-        except Exception as e:  # noqa: BLE001
-            logger.warning(
-                "[path_recognizer] LLM 调用异常 (attempt %d): %s", attempt + 1, e
-            )
-            continue
-    return None
-
-
-async def stage2_llm(
-    text: str,
-    stage1_refs: list[RecognizedRef],
-    settings: Settings,
-) -> list[RecognizedRef]:
-    """Stage 2：LLM 歧义兜底。
-
-    流程：
-    1. LLM 占位符 → 直接降级（返回 Stage 1 + needs_review）
-    2. 调用 LLM → 解析 JSON → 校验字段
-    3. 解析/校验全失败 → 兜底回 Stage 1 + needs_review
-    """
-    # 1. 占位符降级
-    if settings.llm_is_placeholder:
-        logger.info("[path_recognizer] LLM 占位符，降级为 Stage 1 + needs_review")
-        return _fallback_to_stage1(stage1_refs, "LLM 占位符，无法调用")
-
-    # 2. 调用 LLM
-    refs_data = await _call_llm_with_retry(text, stage1_refs, settings)
-    if refs_data is None:
-        logger.warning("[path_recognizer] LLM JSON 解析全部失败，兜底回 Stage 1")
-        return _fallback_to_stage1(stage1_refs, "LLM JSON 解析失败")
-
-    # 3. 校验字段
-    validated: list[RecognizedRef] = []
-    for d in refs_data:
-        if not isinstance(d, dict):
-            continue
-        ref = _validate_ref_dict(d)
-        if ref.raw_text:  # 跳过空 raw_text
-            validated.append(ref)
-
-    if not validated:
-        logger.warning("[path_recognizer] LLM 返回空 refs，兜底回 Stage 1")
-        return _fallback_to_stage1(stage1_refs, "LLM 返回空结果")
-
-    logger.info("[path_recognizer] LLM 识别 %d 条引用", len(validated))
-    return validated
 
 
 def _fallback_to_stage1(
@@ -583,55 +380,21 @@ async def recognize(
     text: str,
     settings: Settings | None = None,
 ) -> RecognitionResult:
-    """混合式识别入口：正则快速匹配 + LLM 歧义兜底。
-
-    Parameters
-    ----------
-    text : 用户输入（自然语言 + 路径/URL 引用的混合文本）
-    settings : 可选，默认单例
-
-    Returns
-    -------
-    RecognitionResult
-    """
+    """确定性识别入口：正则提取后标记歧义，全程不调用生成式模型。"""
     s = settings or get_settings()
-
-    # --- Stage 1：正则快速匹配 ---
-    stage1 = stage1_regex(text)
-    logger.debug("[path_recognizer] Stage 1 匹配 %d 条", len(stage1))
-
-    # --- 切换判定 ---
-    need_llm, reason = _decide_llm(
-        text, stage1, s.path_recognizer_confidence_threshold
+    refs = stage1_regex(text)
+    needs_review, reason = _decide_review(
+        text, refs, s.path_recognizer_confidence_threshold
     )
-
-    if not need_llm:
-        # Stage 1 足够确定，直接返回
-        primary = max(stage1, key=lambda r: r.confidence) if stage1 else None
-        overall = primary.confidence if primary else 0.0
-        return RecognitionResult(
-            refs=stage1,
-            primary=primary,
-            used_llm=False,
-            overall_confidence=overall,
-        )
-
-    logger.info("[path_recognizer] 触发 Stage 2 LLM：%s", reason)
-
-    # --- Stage 2：LLM fallback ---
-    if not s.path_recognizer_llm_enabled:
-        # LLM 开关关闭 → 兜底
-        refs = _fallback_to_stage1(stage1, f"LLM 开关关闭; {reason}")
-    else:
-        refs = await stage2_llm(text, stage1, s)
-
-    primary = max(refs, key=lambda r: r.confidence) if refs else None
-    overall = primary.confidence if primary else 0.0
+    if needs_review:
+        logger.info("[path_recognizer] 正则结果需要复核：%s", reason)
+        refs = _fallback_to_stage1(refs, reason)
+    primary = max(refs, key=lambda ref: ref.confidence) if refs else None
     return RecognitionResult(
         refs=refs,
         primary=primary,
-        used_llm=True,
-        overall_confidence=overall,
+        used_llm=False,
+        overall_confidence=primary.confidence if primary else 0.0,
     )
 
 
@@ -648,9 +411,9 @@ def extract_primary_sync(
     text: str,
     settings: Settings | None = None,
 ) -> Optional[RecognizedRef]:
-    """同步便捷方法（不走 LLM，仅 Stage 1）。
+    """同步便捷方法（仅 Stage 1，不执行额外歧义检查）。
 
-    适用于不需要 LLM 歧义处理的快速路径（如 ingestion 节点的来源判别）。
+    保留原有快速路径行为，适用于 ingestion 节点的来源判别。
     """
     stage1 = stage1_regex(text)
     if not stage1:

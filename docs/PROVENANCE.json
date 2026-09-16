@@ -1,0 +1,54 @@
+{
+  "project": "personal-kb-multiagent",
+  "version": "0.2.0",
+  "variant": "host-delegated",
+  "upstream": "https://github.com/KamisanaAtair/Obsidian-personal-kb-MCP-server",
+  "upstream_commit": "9ebb73669912eb99f2edee27d2aebeebfaf88f6a",
+  "branch": "codex/host-delegated",
+  "verification_date": "2026-09-16",
+  "python": "3.12.14",
+  "tests_passed": 28,
+  "test_embedding": "regression: deterministic replacement; separate integration: real BAAI/bge-m3 with Chroma/BM25 over temporary Vaults",
+  "real_model_and_video_tested": true,
+  "real_embedding": {
+    "model": "BAAI/bge-m3",
+    "revision": "5617a9f61b028005a4858fdac845db406aefb181",
+    "shape": [3, 1024],
+    "related_cosine": 0.862312955507609,
+    "unrelated_cosine": 0.3207901115242663
+  },
+  "real_mcp": {
+    "tool_count": 4,
+    "real_chroma_bm25": true,
+    "staged_excluded": true,
+    "temporary_vault_only": true
+  },
+  "real_video": {
+    "input": "temporary MP4 made from locally synthesized English speech",
+    "model": "faster-whisper-medium",
+    "device": "cpu",
+    "compute_type": "int8",
+    "prepare_created_no_vault_files": true
+  },
+  "dependency_snapshot": {
+    "installed_distributions": 159,
+    "compatibility_check": "passed",
+    "is_version_lock": false
+  },
+  "workbuddy": {
+    "version": "5.3.14",
+    "configuration_loaded": true,
+    "native_trust_completed": false,
+    "connection_and_host_generation_verified": false
+  },
+  "known_limitations": [
+    "BM25 relies on the server-owned promoted-only index; externally injected staged documents can be returned for matching terms"
+  ],
+  "not_verified": [
+    "WorkBuddy connection and complete Host generation loop after native trust",
+    "external video sites and subtitles",
+    "Chinese ASR quality",
+    "Obsidian CLI writes",
+    "long-video and large-Vault performance"
+  ]
+}

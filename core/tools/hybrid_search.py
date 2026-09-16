@@ -28,7 +28,7 @@ import threading
 from typing import Any, List, Optional, Tuple
 
 from config.settings import Settings, get_settings
-from core.tools.llm import get_embeddings
+from core.tools.embeddings import get_local_embeddings
 
 logger = logging.getLogger(__name__)
 
@@ -337,7 +337,7 @@ def hybrid_retrieve(
     top_k : 最终返回的 chunk 数
     settings : 配置（含权重、RRF k、候选倍数等）
     embeddings : embedding 实例（可选）。由调用方传入可保证测试 monkeypatch 生效，
-                 None 时内部自行 get_embeddings()
+                 None 时内部自行 get_local_embeddings()
 
     Returns
     -------
@@ -349,7 +349,7 @@ def hybrid_retrieve(
 
     # embeddings 由调用方传入（保证 retriever.py 的 monkeypatch 传递生效）
     if embeddings is None:
-        embeddings = get_embeddings(s)
+        embeddings = get_local_embeddings(s)
     vectorstore = Chroma(
         collection_name=s.rag_collection_name,
         embedding_function=embeddings,

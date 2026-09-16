@@ -1,6 +1,6 @@
 """Retrieval/QA 子图 —— 对应 MCP 工具 query_kb。
 
-入口：单一 retrieval_qa_node，仅检索 promoted 笔记回答 + 引用来源。
+入口：单一 retrieval_qa_node，返回 promoted 笔记片段与 Host 回答 prompt。
 """
 
 from __future__ import annotations

@@ -1,55 +1,51 @@
-"""KBState —— 全局状态 Schema。
+"""KBState —— 四个 Host-delegated 子图共享的状态 Schema。
 
-设计原则（需求第6节）：每个字段只由唯一一个 agent 负责写入，其余 agent 只读，
-避免多节点写同一字段导致状态互相覆盖（此前项目卡住的主要原因）。
-
-字段写入归属：
-- source_type / raw_content / processed_note → Ingestion Agent 写
-- retrieved_chunks                            → Retrieval/QA Agent 写
-- related_notes                               → Correlation Agent 写
-- answer                                      → Retrieval/QA Agent 写
-- related_note_links                          → v2 预留，本期不写入逻辑
-- messages                                    → 各节点追加（标准 reducer）
-
-注意：intent 字段已移除——路由由 MCP Host 选工具完成，图内不再二次判断。
+prepare 取得原文并创建会话，finalize 接收 Host 正文并创建 staged 笔记。
+关联发现只返回 candidates；问答只返回 retrieved_chunks，生成式判断均由 Host 完成。
+prompt_for_host 由 prepare/correlation/retrieval 三个独立入口分别写入。
+related_note_links 中的 v2 仍指图谱感知检索，与本次 host-delegated 改造无关。
 """
 
 from __future__ import annotations
 
-from typing import Annotated, List, Optional, TypedDict
+from typing import Annotated, List, Literal, Optional, TypedDict
 
 try:
     from langgraph.graph.message import add_messages
-except ImportError:  # langgraph 未安装时仍可导入本模块做静态检查
-    def add_messages(left, right):  # type: ignore[no-redef]
+except ImportError:
+    def add_messages(left, right):
         return (left or []) + (right or [])
 
 
-from typing import Literal  # noqa: E402
-
-
 class KBState(TypedDict, total=False):
-    """三个 Agent 共享的状态结构（total=False：字段皆可选，各子图按需使用）。"""
+    """四个子图（prepare/finalize/correlation/retrieval）共享的状态结构。"""
 
-    # 用户输入（提问内容 / 摄取来源描述）
     user_input: str
 
-    # ---- Ingestion Agent 写 ----
-    # video_url: 用户输入中含视频站链接；video_file: 含本地视频文件路径。
-    # 用户输入几乎总是"自然语言 + 视频引用"混合，由 ingestion 节点负责分离提取。
+    # ---- ingestion_prepare_node 写 ----
     source_type: Optional[Literal["video_url", "video_file", "note_path", "raw_text"]]
-    raw_content: Optional[str]          # Ingestion 的原始输入（转写文本 / 导入文本）
-    processed_note: Optional[str]       # Ingestion 处理完的笔记内容（含 frontmatter）
-    note_path: Optional[str]            # 落地后的笔记相对路径
+    raw_content: Optional[str]          # 转写文本 / 导入文本（未格式化）
+    prepare_id: Optional[str]           # finalize 靠会话 ID 查回权威来源
 
-    # ---- Correlation Agent 写 ----
-    related_notes: List[dict]           # 建议关联列表：[{path, reason, score}]
+    # ---- ingestion_finalize_node 读/写 ----
+    note_content: Optional[str]         # 输入：Host 生成的 Markdown 正文
+    processed_note: Optional[str]       # 输出：补全 frontmatter 并强制 staged 的正文
+    note_path: Optional[str]            # 输出：笔记相对 Vault 根目录的路径
+    error: Optional[str]                # 校验错误必须进入 schema，避免被 LangGraph 丢弃
+
+    # ---- correlation_node 写 ----
+    candidates: List[dict]              # 未经生成处理的 [{path, snippet, score}]
     # 预留：v2 图谱感知检索用，本期不写入逻辑
     related_note_links: Optional[List[str]]
 
-    # ---- Retrieval/QA Agent 写 ----
-    retrieved_chunks: List[dict]        # 召回结果：[{content, path, score}]
-    answer: Optional[str]               # 最终返回内容（含引用来源）
+    # ---- retrieval_qa_node 写 ----
+    retrieved_chunks: List[dict]        # [{content, path, score, source}]
+    no_hit_message: Optional[str]       # 无命中时的确定性文案
+    # answer: Optional[str]
+    # host-delegated 起答案合成转移到 Host，服务端不再写入，保留注释便于比对。
 
-    # ---- 共享：对话历史，标准 reducer，节点追加不互相覆盖 ----
+    # ---- 共享：交给 Host 执行生成判断的指令 ----
+    prompt_for_host: Optional[str]
+
+    # ---- 共享：对话历史，标准 reducer ----
     messages: Annotated[list, add_messages]

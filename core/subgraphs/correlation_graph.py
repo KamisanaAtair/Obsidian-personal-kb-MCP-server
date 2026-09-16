@@ -1,6 +1,6 @@
 """Correlation 子图 —— 对应 MCP 工具 trigger_correlation。
 
-入口：单一 correlation_node，对刚 promoted 的笔记输出建议关联（只读）。
+入口：单一 correlation_node，对 promoted 笔记返回候选与 Host 生成 prompt（只读）。
 """
 
 from __future__ import annotations

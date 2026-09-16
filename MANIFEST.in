@@ -1,0 +1,6 @@
+include .env.example .gitignore langgraph.json PROJECT_README.md PROJECT_CONTEXT.md struct.md
+include docs/DECISIONS.md docs/HOST_USAGE.md docs/IMPLEMENTATION_REPORT.md docs/PROVENANCE.json
+include docs/workbuddy.md examples/workbuddy.mcp.json
+exclude docs/WORKBUDDY_* docs/*-output.txt docs/artifact-check.txt
+recursive-include tests *.py *.json
+global-exclude __pycache__ *.py[cod]

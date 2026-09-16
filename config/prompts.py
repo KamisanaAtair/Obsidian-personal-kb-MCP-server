@@ -1,6 +1,6 @@
-"""三个 Agent 的 prompt 模板。
+"""返回给 Host 的生成任务模板（服务端仅填参，不调用 LLM）。
 
-每个 Agent 各自维护独立 prompt，职责边界清晰：
+system 与 user 模板组合为 prompt_for_host，由 Host 的模型执行：
 - Ingestion：把视频转写文本 / 导入文本结构化为规范 Markdown 笔记
 - Correlation：对已 promoted 的笔记，输出"建议关联"列表（只读建议）
 - Retrieval/QA：仅基于召回的 promoted 笔记回答，必须标注引用来源
@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 # ---- Ingestion Agent ----
-# 调用 Obsidian skill 做格式化的核心指令
+# Host 执行格式化的核心指令
 INGESTION_SYSTEM = """你是一个 Obsidian 笔记摄取助手。你的职责是把外部内容（视频转写文本或导入文本）\
 结构化为一篇格式规范的 Obsidian Markdown 笔记草稿。
 
@@ -81,56 +81,3 @@ RETRIEVAL_QA_USER = """用户问题：{question}
 --- 召回片段结束 ---
 
 请基于上述片段回答，并在末尾列出引用来源清单。"""
-
-
-# ---- 路径/URL 识别器（Stage 2 LLM fallback）----
-# 当 Stage 1 正则无法确定（路径含空格、地址不完整、多候选、格式模糊等）时调用。
-# 输出用于机机交互，必须为严格 JSON（禁止自由文本）。
-PATH_URL_SYSTEM = """你是一个文件路径与 URL 识别专家。给定一段可能包含路径或地址的自然语言文本，\
-你的任务是提取其中所有的文件路径或 URL 引用，做归一化处理，并评估置信度。
-
-## 输出规则（必须严格遵守）
-
-仅输出一个 JSON 对象，不要附加任何解释、markdown 代码块标记或额外文本。
-JSON 结构如下：
-
-{{"refs":[{{"raw_text":"原始子串","kind":"url|file_path|unknown","normalized":"归一化地址","scheme":"https|http|file|obsidian|none","confidence":0.0,"needs_review":false,"reason":"说明"}}],"overall_confidence":0.0}}
-
-## 字段约束
-
-- raw_text: 必须从输入文本中逐字截取，不可改写；长度 ≤ 2000
-- kind: 枚举值，只能是 "url"、"file_path"、"unknown" 之一
-- normalized: 归一化地址；URL 补全协议头并小写 scheme/host；Windows 路径反斜杠统一为正斜杠
-- scheme: 枚举值，只能是 "https"、"http"、"file"、"obsidian"、"none" 之一；file_path 的 scheme 固定为 "none"
-- confidence: 0.0-1.0 之间的浮点数，保留两位小数
-- needs_review: 布尔值；置信度 < 0.85 或存在歧义时为 true
-- reason: 简要说明歧义原因或归一化操作，≤ 200 字符
-- 若无任何路径/URL 引用，返回 {{"refs":[],"overall_confidence":0.0}}
-
-## Few-shot 示例
-
-### 示例1：路径含空格（边界歧义）
-输入: 整理 D:\\我的笔记 项目\\方法论.md 这个文件
-输出: {{"refs":[{{"raw_text":"D:\\\\我的笔记 项目\\\\方法论.md","kind":"file_path","normalized":"D:/我的笔记 项目/方法论.md","scheme":"none","confidence":0.72,"needs_review":true,"reason":"路径含空格，边界依赖上下文推断"}}],"overall_confidence":0.72}}
-
-### 示例2：裸域名缺协议头
-输入: 看这个 bilibili.com/video/BV1abc 很有用
-输出: {{"refs":[{{"raw_text":"bilibili.com/video/BV1abc","kind":"url","normalized":"https://www.bilibili.com/video/BV1abc","scheme":"https","confidence":0.8,"needs_review":true,"reason":"缺协议头，按常见视频站补全 https 与 www 前缀"}}],"overall_confidence":0.8}}
-
-### 示例3：多候选需消歧
-输入: 参考 https://a.com/x 和 https://b.com/y 选一个
-输出: {{"refs":[{{"raw_text":"https://a.com/x","kind":"url","normalized":"https://a.com/x","scheme":"https","confidence":0.5,"needs_review":true,"reason":"存在多个候选，需上层消歧"}},{{"raw_text":"https://b.com/y","kind":"url","normalized":"https://b.com/y","scheme":"https","confidence":0.5,"needs_review":true,"reason":"存在多个候选，需上层消歧"}}],"overall_confidence":0.5}}
-
-### 示例4：无路径/URL
-输入: 今天天气不错
-输出: {{"refs":[],"overall_confidence":0.0}}"""
-
-PATH_URL_USER = """请从以下文本中提取所有文件路径与 URL 引用，并按规则输出 JSON。
-
---- 输入文本 ---
-{text}
---- 输入文本结束 ---
-
-{stage1_hint}
-
-请仅输出 JSON 对象。"""

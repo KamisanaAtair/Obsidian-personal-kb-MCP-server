@@ -25,7 +25,7 @@ import logging
 from typing import Any, List, Optional
 
 from config.settings import Settings, get_settings
-from core.tools.llm import get_embeddings
+from core.tools.embeddings import get_local_embeddings
 from core.tools.vault_io import NoteMeta, list_promoted_notes
 from langchain_chroma import Chroma
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
@@ -149,7 +149,7 @@ def index_vault(settings=None) -> int:
     s = settings or get_settings()
 
     promoted = list_promoted_notes(s)
-    embeddings = get_embeddings(s)
+    embeddings = get_local_embeddings(s)
     s.chroma_path.mkdir(parents=True, exist_ok=True)
 
     # 幂等：先删除旧集合再重建（修复此前"只 add 不清空"导致重复 chunk 的问题）
@@ -243,7 +243,7 @@ def _ensure_index_fresh_impl(s: Settings) -> dict:
             "rebuilt": True,
         }
 
-    embeddings = get_embeddings(s)
+    embeddings = get_local_embeddings(s)
     s.chroma_path.mkdir(parents=True, exist_ok=True)
     vectorstore = Chroma(
         collection_name=s.rag_collection_name,
@@ -316,7 +316,7 @@ def retrieve(
     """
     s = settings or get_settings()
     k = top_k or s.rag_top_k
-    embeddings = get_embeddings(s)
+    embeddings = get_local_embeddings(s)
 
     # 混合检索路径
     if s.hybrid_search_enabled:
