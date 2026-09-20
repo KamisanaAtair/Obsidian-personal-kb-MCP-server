@@ -369,6 +369,10 @@ _DASHSCOPE_ASR_URL = (
     "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
 )
 _DASHSCOPE_ASR_TIMEOUT_SECONDS = 300  # 云端转写一般 10s~3min，留足余量
+# 官方限制：单次音频时长 ≤5 分钟、base64 编码后 ≤10MB。
+# 16kHz 单声道 wav ≈ 32KB/s：180s → 原始 5.6MB → base64 ≈ 7.4MB（安全余量）。
+_DASHSCOPE_MAX_B64_BYTES = 9_500_000  # base64 体积软上限（10MB 官方限留余量）
+_DASHSCOPE_CHUNK_CONCURRENCY = 3      # 分段并发请求数（避免触发限流）
 
 
 def _dashscope_asr_transcribe(audio_path: str, settings: Settings) -> str:
@@ -384,36 +388,140 @@ def _dashscope_asr_transcribe(audio_path: str, settings: Settings) -> str:
          "parameters": {"format": "wav", "sample_rate": "16000"}}
 
     音频引用规则：
-    - 本地文件 → base64 data URI（data:audio/wav;base64,...）内联上传
+    - 公网 http(s) URL → 直接透传（云端自行下载，无体积顾虑）
+    - 本地小文件（base64 后 ≤ 约 9.5MB）→ data URI 单次内联上传
+    - 本地大文件 → ffmpeg 按 chunk_seconds 分段（官方限：单次 ≤5 分钟且
+      base64 ≤10MB），分段并发转写后按顺序拼接文本
       （上游 ffmpeg/yt-dlp 已统一产出 16kHz 单声道 wav，与 parameters 对齐）
-    - 公网 http(s) URL → 直接透传
     """
     api_key = settings.dashscope_api_key
     if not api_key:
         raise RuntimeError(
-            "DASHSCOPE_API_KEY 未配置。请在 .env 设置 DASHSCOPE_API_KEY"
+            "DASHSCOPE_API_KEY 未配置。请在 secrets.env 设置 DASHSCOPE_API_KEY"
             "（阿里百炼 API Key，https://bailian.console.aliyun.com）后重试。"
         )
 
     if re.match(r"^https?://", audio_path, re.IGNORECASE):
-        audio_ref = audio_path
         logger.info("[dashscope-asr] 公网音频 URL 直接透传: %s", audio_path)
-    else:
-        data = Path(audio_path).read_bytes()
-        if len(data) > 100 * 1024 * 1024:
-            logger.warning(
-                "[dashscope-asr] 音频文件 %.1f MB，超过云端单请求建议上限，可能被拒绝",
-                len(data) / 1024 / 1024,
-            )
-        audio_ref = (
-            "data:audio/" + settings.dashscope_asr_format
-            + ";base64," + base64.b64encode(data).decode("ascii")
-        )
+        return _dashscope_asr_request(api_key, audio_path, settings)
+
+    data = Path(audio_path).read_bytes()
+    b64_size = len(data) * 4 // 3
+    if b64_size <= _DASHSCOPE_MAX_B64_BYTES:
+        audio_ref = _wav_to_data_uri(data, settings)
         logger.info(
-            "[dashscope-asr] 本地音频 %s（%.2f MB）→ base64 data URI 内联上传",
+            "[dashscope-asr] 本地音频 %s（%.2f MB）→ base64 data URI 单次上传",
             audio_path, len(data) / 1024 / 1024,
         )
+        return _dashscope_asr_request(api_key, audio_ref, settings)
 
+    # 大文件：ffmpeg 分段 → 并发转写 → 按序拼接
+    logger.info(
+        "[dashscope-asr] 本地音频 %.2f MB（base64 约 %.1f MB）超过单请求上限，"
+        "按 %d 秒分段转写",
+        len(data) / 1024 / 1024, b64_size / 1024 / 1024,
+        settings.dashscope_asr_chunk_seconds,
+    )
+    chunks = _split_audio_by_seconds(
+        audio_path, settings.dashscope_asr_chunk_seconds
+    )
+    if not chunks:
+        raise RuntimeError(f"音频分段失败: {audio_path}")
+    logger.info("[dashscope-asr] 分段完成，共 %d 段，并发转写中...", len(chunks))
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    texts: list[str] = [""] * len(chunks)
+    with ThreadPoolExecutor(max_workers=_DASHSCOPE_CHUNK_CONCURRENCY) as pool:
+        futures = {
+            pool.submit(_transcribe_chunk_file, api_key, str(c), settings): i
+            for i, c in enumerate(chunks)
+        }
+        for fut, idx in futures.items():
+            texts[idx] = fut.result()
+
+    # 清理分段临时文件（与原音频同目录的 chunk_*.wav）
+    for c in chunks:
+        try:
+            Path(c).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    merged = "\n".join(t.strip() for t in texts if t and t.strip())
+    if not merged:
+        raise RuntimeError("阿里百炼 ASR 所有分段均未返回文本")
+    logger.info("[dashscope-asr] 分段转写完成，共 %d 段，合计 %d 字符", len(chunks), len(merged))
+    return merged
+
+
+def _transcribe_chunk_file(api_key: str, chunk_path: str, settings: Settings) -> str:
+    """分段文件 → data URI → 单次 ASR 请求（工作线程内执行）。"""
+    data = Path(chunk_path).read_bytes()
+    audio_ref = _wav_to_data_uri(data, settings)
+    logger.info(
+        "[dashscope-asr] 分段 %s（%.2f MB）上传转写",
+        Path(chunk_path).name, len(data) / 1024 / 1024,
+    )
+    return _dashscope_asr_request(api_key, audio_ref, settings)
+
+
+def _wav_to_data_uri(data: bytes, settings: Settings) -> str:
+    """wav 字节 → base64 data URI。"""
+    return (
+        "data:audio/" + settings.dashscope_asr_format
+        + ";base64," + base64.b64encode(data).decode("ascii")
+    )
+
+
+def _split_audio_by_seconds(audio_path: str, chunk_seconds: int) -> list[Path]:
+    """ffmpeg 把音频切成等长分段（stream copy，不重编码）。
+
+    返回分段文件列表（chunk_000.wav, chunk_001.wav, ...），放在原音频同目录。
+    """
+    out_dir = Path(audio_path).parent
+    pattern = str(out_dir / "chunk_%03d.wav")
+    cmd = [
+        "ffmpeg", "-y", "-i", audio_path,
+        "-f", "segment",
+        "-segment_time", str(chunk_seconds),
+        "-c", "copy",
+        pattern,
+    ]
+    logger.debug("[dashscope-asr] 分段命令: %s", " ".join(cmd))
+    proc = subprocess.run(
+        cmd, capture_output=True, text=True, timeout=300
+    )
+    if proc.returncode != 0:
+        logger.error(
+            "[dashscope-asr] ffmpeg 分段失败: %s", proc.stderr[-500:]
+        )
+        return []
+    return sorted(out_dir.glob("chunk_*.wav"))
+
+
+def _dashscope_asr_request(api_key: str, audio_ref: str, settings: Settings) -> str:
+    """单次 DashScope ASR 请求（audio_ref 为 URL 或 data URI）→ 文本。
+
+    网络类错误自动重试一次（分段并发时偶发超时/断连）。
+    """
+    last_err: Exception | None = None
+    for attempt in (1, 2):
+        try:
+            return _dashscope_asr_call_once(api_key, audio_ref, settings)
+        except RuntimeError as e:
+            # 非网络/HTTP 类错误（如密钥无效、参数错误）直接抛出，不重试
+            if "网络错误" not in str(e) and "HTTP" not in str(e):
+                raise
+            last_err = e
+            logger.warning(
+                "[dashscope-asr] 请求失败（第 %d 次），%s",
+                attempt, "重试中..." if attempt == 1 else "放弃",
+            )
+    raise last_err  # type: ignore[misc]
+
+
+def _dashscope_asr_call_once(api_key: str, audio_ref: str, settings: Settings) -> str:
+    """执行一次 DashScope multimodal-generation ASR 调用。"""
     payload = {
         "model": settings.dashscope_asr_model,
         "input": {
@@ -445,12 +553,6 @@ def _dashscope_asr_transcribe(audio_path: str, settings: Settings) -> str:
         },
         method="POST",
     )
-    logger.info(
-        "[dashscope-asr] 调用百炼 ASR（model=%s, format=%s, sample_rate=%d）...",
-        settings.dashscope_asr_model,
-        settings.dashscope_asr_format,
-        settings.dashscope_asr_sample_rate,
-    )
     try:
         with urllib.request.urlopen(req, timeout=_DASHSCOPE_ASR_TIMEOUT_SECONDS) as resp:
             body = json.loads(resp.read().decode("utf-8"))
@@ -462,10 +564,12 @@ def _dashscope_asr_transcribe(audio_path: str, settings: Settings) -> str:
 
     text = _extract_dashscope_text(body)
     if not text:
-        raise RuntimeError(
-            "阿里百炼 ASR 未返回文本，响应: "
-            + json.dumps(body, ensure_ascii=False)[:500]
+        # 某些分段可能无语音（静音/片尾），返回空串由调用方容忍
+        logger.info(
+            "[dashscope-asr] 本次请求未返回文本（request_id=%s），可能为静音段",
+            body.get("request_id", "n/a"),
         )
+        return ""
     logger.info(
         "[dashscope-asr] 转写完成，共 %d 字符（request_id=%s）",
         len(text), body.get("request_id", "n/a"),

@@ -82,6 +82,10 @@ class Settings(BaseSettings):
     dashscope_asr_model: str = "qwen-audio-3.0-asr-flash"
     dashscope_asr_format: str = "wav"                  # 音频格式（与 ffmpeg/yt-dlp 提取输出一致）
     dashscope_asr_sample_rate: int = 16000             # 采样率（Hz）
+    # 单请求分段时长（秒）。官方限制：qwen-audio-3.0-asr-flash 单次音频 ≤5 分钟、
+    # base64 编码后 ≤10MB。16kHz 单声道 wav 约 32KB/s，180s 原始 5.6MB → base64 约
+    # 7.4MB，留有安全余量；超长音频会自动按此时长分段转写后拼接。
+    dashscope_asr_chunk_seconds: int = 180
 
     # [已停用 2026-09-20] 本地 Whisper 转写配置 —— 已改用上方阿里百炼 ASR。
     # 如需回退本地转写：取消下方注释，并恢复 core/tools/video_to_text.py 中
