@@ -46,6 +46,8 @@ python -m mcp_server.server
 
 默认 `VIDEO_TO_TEXT_MCP_ENABLED=false`，视频返回带 STUB 标记的示例转写。真实视频转写须启用此开关并安装 ffmpeg；纯文本摄取不需要启用它。
 
+视频转写如需从本地 Whisper 切换为云端 ASR（长音频转写从约 1× 实时降到 10 秒~3 分钟量级），国内各平台（阿里云、腾讯云、讯飞）的免费政策、定价与官网链接整理在根目录的 [ASR 免费政策与定价速查](ASR_PRICING_AND_FREE_TIER.md)，具体定价细则请查看该文档。
+
 Host 必须在**同一个服务进程**内完成 prepare → 生成 → finalize；`prepare_id` 默认 60 分钟有效，重启即失效。具体连接参数、交互示例及调试命令见 [Host 使用说明](docs/HOST_USAGE.md)。
 
 WorkBuddy 用户可按 [接入指南](docs/workbuddy.md) 合并 [通用 MCP 配置示例](examples/workbuddy.mcp.json)，其中包含服务 description 和四工具工作约定。示例中的绝对路径须先替换。
