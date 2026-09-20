@@ -271,6 +271,24 @@ async def _try_whisper_transcription(
         return None
     audio_file = audio_files[0]
 
+    # 音频标准化：统一重编码为 16kHz 单声道 wav。
+    # ⚠️ 关键：yt-dlp 的 wav 后处理保留源采样率/声道（B 站 48kHz 立体声，
+    # 20 分钟约 237MB → base64 约 315MB，必然触发 DashScope 网关断连）。
+    # 标准化后 20 分钟约 38MB，与 dashscope 分段体积预算对齐。
+    # （本地文件路径已是 16k 单声道，重编码为无操作级开销，统一处理更稳。）
+    normalized = work / "audio_norm.wav"
+    norm_cmd = [
+        "ffmpeg", "-y", "-i", str(audio_file),
+        "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+        str(normalized),
+    ]
+    logger.debug("[video_to_text] 音频标准化: %s", " ".join(norm_cmd))
+    await _run_async(norm_cmd)
+    if normalized.is_file() and normalized.stat().st_size > 0:
+        audio_file = normalized
+    else:
+        logger.warning("[video_to_text] 音频标准化失败，退回原始提取音频")
+
     # [已停用 2026-09-20] 本地 Whisper 转写（faster-whisper/openai-whisper）：
     # CPU 转写过慢（30 分钟音频实测 32.4 分钟），改用阿里百炼云端 ASR。
     # 原代码：
@@ -558,6 +576,11 @@ def _dashscope_asr_call_once(api_key: str, audio_ref: str, settings: Settings) -
             body = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", errors="ignore")[:500]
+        # 静音/无语音段返回 400 + ASR_RESPONSE_HAVE_NO_WORDS：
+        # 分段转写中的纯音乐/片头片尾属正常情况，按空文本处理而非失败
+        if e.code == 400 and "ASR_RESPONSE_HAVE_NO_WORDS" in detail:
+            logger.info("[dashscope-asr] 本段无语音内容（静音段），返回空文本")
+            return ""
         raise RuntimeError(f"阿里百炼 ASR 请求失败 HTTP {e.code}: {detail}") from e
     except urllib.error.URLError as e:
         raise RuntimeError(f"阿里百炼 ASR 网络错误: {e.reason}") from e
