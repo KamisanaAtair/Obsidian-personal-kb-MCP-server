@@ -390,7 +390,7 @@ _DASHSCOPE_ASR_TIMEOUT_SECONDS = 300  # 云端转写一般 10s~3min，留足余�
 # 官方限制：单次音频时长 ≤5 分钟、base64 编码后 ≤10MB。
 # 16kHz 单声道 wav ≈ 32KB/s：180s → 原始 5.6MB → base64 ≈ 7.4MB（安全余量）。
 _DASHSCOPE_MAX_B64_BYTES = 9_500_000  # base64 体积软上限（10MB 官方限留余量）
-_DASHSCOPE_CHUNK_CONCURRENCY = 3      # 分段并发请求数（避免触发限流）
+_DASHSCOPE_CHUNK_CONCURRENCY = 7      # 分段并发请求数（压低总耗时，控制超时风险）
 
 
 def _dashscope_asr_transcribe(audio_path: str, settings: Settings) -> str:

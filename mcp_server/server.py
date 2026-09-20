@@ -9,7 +9,10 @@
 
 from __future__ import annotations
 
+import json
 import logging
+from datetime import datetime, timezone
+from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
@@ -26,6 +29,31 @@ logger = logging.getLogger(__name__)
 
 mcp = FastMCP("personal-kb-multiagent")
 
+# prepare 结果落盘（JSONL，追加写）。用途：长视频转写可能超过 MCP 客户端
+# 超时（服务端仍会完成转写），客户端拿不到响应时，Host 可从此文件恢复
+# prepare_id / raw_content / prompt_for_host，直接调用 finalize，避免重复转写。
+_PREPARE_LOG = Path(__file__).resolve().parents[1] / "logs" / "ingest_prepare.jsonl"
+
+
+def _log_prepare_result(result: dict) -> None:
+    """把 prepare 结果写入 JSONL 日志（失败不影响主流程）。
+
+    注意：只序列化可 JSON 化的四个字段（图状态中还含 AIMessage 等对象）。
+    """
+    try:
+        _PREPARE_LOG.parent.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "prepare_id": result.get("prepare_id"),
+            "source_type": result.get("source_type"),
+            "raw_content": result.get("raw_content"),
+            "prompt_for_host": result.get("prompt_for_host"),
+        }
+        with _PREPARE_LOG.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except (OSError, TypeError) as e:
+        logger.warning("[server] prepare 结果落盘失败: %s", e)
+
 
 @mcp.tool()
 async def ingest_content_prepare(user_input: str) -> dict:
@@ -40,6 +68,7 @@ async def ingest_content_prepare(user_input: str) -> dict:
     返回 {prepare_id, source_type, raw_content, prompt_for_host}。
     """
     result = await ingestion_prepare_graph.ainvoke({"user_input": user_input})
+    _log_prepare_result(result)
     return {
         "prepare_id": result["prepare_id"],
         "source_type": result["source_type"],

@@ -9,7 +9,7 @@
     "RETRIEVAL_QA_USER": "用户问题：{question}\n\n--- 召回的 promoted 笔记片段 ---\n{context_block}\n--- 召回片段结束 ---\n\n请基于上述片段回答，并在末尾列出引用来源清单。"
   },
   "sha256": {
-    "core/tools/video_to_text.py": "0ca47b22f65174a7a551445c287bd5780cf7a032d9cad97d9eeb69a6e771d830",
+    "core/tools/video_to_text.py": "135ce4e0d105f1c4eb86658187caf731671e8bb14d2a68ea4c07a1ac47d767f3",
     "core/tools/embeddings.py": "a48573c1070511c520074b19db863bc72b07345fd389fbdc9202ffc550eecd70",
     "scripts/download_embed_model.py": "78866342acc7da2444dc435ab8de85bf6ae0d652df67258d8302666fbcfe0382"
   }

@@ -40,3 +40,6 @@ local-validation/
 /docs/WORKBUDDY_*
 /docs/*-output.txt
 /docs/artifact-check.txt
+
+# MCP server prepare 结果恢复日志（本地调试/超时恢复用）
+logs/
