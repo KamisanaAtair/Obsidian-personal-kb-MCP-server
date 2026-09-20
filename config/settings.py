@@ -13,8 +13,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """应用配置，从 .env 文件与环境变量加载。"""
 
+    # env_file 列表：后面的文件优先级更高。
+    # secrets.env 集中存放 API Key 等敏感凭据（已 gitignore，维护在私密库），
+    # 克隆/部署后放回项目根目录即可生效；不存在时自动跳过，不影响启动。
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(".env", "secrets.env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -71,12 +74,23 @@ class Settings(BaseSettings):
     # ENABLED=false 时走 stub（用于无 ffmpeg/网络环境调试）。
     video_to_text_mcp_enabled: bool = False  # 命名保留兼容；实际控制视频转写真实/stub
 
-    # Whisper 转写配置
-    whisper_backend: Literal["faster-whisper", "openai-whisper"] = "faster-whisper"
-    whisper_model: str = "medium"          # faster-whisper/openai-whisper 模型规格
-    whisper_language: str = "zh"           # 转写语言
-    whisper_device: str = "cpu"            # cpu | cuda
-    whisper_compute_type: str = "int8"     # int8(cpu) | float16(gpu) | float32
+    # ---- 阿里百炼（DashScope）云端 ASR：替代本地 Whisper ----
+    # 背景：本地 faster-whisper medium (CPU) 转写 30 分钟音频实测需 32.4 分钟，
+    # 远超 MCP 同步请求超时；改用云端 qwen-audio-3.0-asr-flash（选型调研见
+    # ASR_PRICING_AND_FREE_TIER.md）。
+    dashscope_api_key: str = ""                        # 阿里百炼 API Key（DASHSCOPE_API_KEY）
+    dashscope_asr_model: str = "qwen-audio-3.0-asr-flash"
+    dashscope_asr_format: str = "wav"                  # 音频格式（与 ffmpeg/yt-dlp 提取输出一致）
+    dashscope_asr_sample_rate: int = 16000             # 采样率（Hz）
+
+    # [已停用 2026-09-20] 本地 Whisper 转写配置 —— 已改用上方阿里百炼 ASR。
+    # 如需回退本地转写：取消下方注释，并恢复 core/tools/video_to_text.py 中
+    # _whisper_transcribe / _whisper_faster / _whisper_openai 及其调用点。
+    # whisper_backend: Literal["faster-whisper", "openai-whisper"] = "faster-whisper"
+    # whisper_model: str = "medium"          # faster-whisper/openai-whisper 模型规格
+    # whisper_language: str = "zh"           # 转写语言
+    # whisper_device: str = "cpu"            # cpu | cuda
+    # whisper_compute_type: str = "int8"     # int8(cpu) | float16(gpu) | float32
 
     # ---- 确定性路径/URL 识别 ----
     # 歧义候选由 needs_review 标记；服务端不调用模型消歧。

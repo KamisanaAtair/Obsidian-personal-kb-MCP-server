@@ -9,6 +9,9 @@ build/
 # 环境配置
 .env
 
+# 敏感凭据（API Key 等集中存放；维护在私密库，勿提交）
+secrets.env
+
 # 向量库 / Chroma 持久化
 .chroma_db/
 

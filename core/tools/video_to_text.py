@@ -7,7 +7,7 @@ bilibili-render-pdf 是一个 WorkBuddy skill（仅 WorkBuddy Host 可用）。�
 因此参考其"视频→文本"部分的三级 fallback 方法论，在本模块独立实现：
 
     1. 优先下载平台 CC 字幕（zh-Hans / zh-CN / zh / ai-zh）
-    2. 无 CC 字幕时，提取音频 → Whisper 转写
+    2. 无 CC 字幕时，提取音频 → 阿里百炼 ASR（qwen-audio-3.0-asr-flash）转写
     3. 音质过差时纯视觉抽帧 —— 超出 MVP 范围，本期不实现
 
 原 skill 的 LaTeX/PDF 渲染部分**不适用**（需求产出 Obsidian Markdown 笔记，非 PDF），
@@ -17,7 +17,9 @@ bilibili-render-pdf 是一个 WorkBuddy skill（仅 WorkBuddy Host 可用）。�
 ----
 - yt-dlp（字幕下载 / 音频提取）
 - ffmpeg（yt-dlp 音频提取后端，需系统安装并在 PATH）—— 缺失时仅 CC 字幕路径可用
-- faster-whisper（默认，轻量）或 openai-whisper（精度高、依赖 torch）
+- [已停用 2026-09-20] 本地 faster-whisper / openai-whisper 转写：CPU 实测过慢
+  （30 分钟音频需 32.4 分钟），改用阿里百炼云端 ASR（qwen-audio-3.0-asr-flash），
+  仅需在 .env 配置 DASHSCOPE_API_KEY，无需本地模型。
 
 切换开关：.env VIDEO_TO_TEXT_MCP_ENABLED=true 启用真实实现，false 走 stub。
 """
@@ -25,11 +27,15 @@ bilibili-render-pdf 是一个 WorkBuddy skill（仅 WorkBuddy Host 可用）。�
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import logging
 import re
 import shutil
 import subprocess
 import tempfile
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -60,8 +66,8 @@ class TranscriptResult:
     """转写结果。"""
 
     text: str                       # 纯文本（已合并时间戳片段）
-    source: str                     # "cc_subtitle" | "whisper" | "stub"
-    srt_path: Optional[str] = None  # 原始 SRT 路径（可选保留）
+    source: str                     # "cc_subtitle" | "dashscope_asr" | "stub"
+    srt_path: Optional[str] = None  # 原始转写文件路径（可选保留；云端 ASR 为纯文本）
 
 
 def extract_video_url(text: str) -> Optional[str]:
@@ -139,7 +145,7 @@ async def transcribe_video(video_ref: str) -> str:
     if not s.video_to_text_mcp_enabled:
         logger.warning(
             "[video_to_text] STUB 模式（VIDEO_TO_TEXT_MCP_ENABLED=false）。"
-            "返回占位文本。在 .env 设为 true 启用真实 yt-dlp + whisper 转写。"
+            "返回占位文本。在 .env 设为 true 启用真实 yt-dlp + 阿里百炼 ASR 转写。"
         )
         return _stub_transcript(video_ref)
 
@@ -148,13 +154,13 @@ async def transcribe_video(video_ref: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 真实实现：三级 fallback（CC 字幕 → Whisper → 失败）
+# 真实实现：三级 fallback（CC 字幕 → 阿里百炼 ASR → 失败）
 # ---------------------------------------------------------------------------
 
 async def _transcribe_real(video_ref: str, settings: Settings) -> TranscriptResult:
     """真实转写。分两条路径：
-    - 本地视频文件：无 CC 字幕可下载，直接 ffmpeg 提音频 → Whisper
-    - 视频链接：CC 字幕优先 → Whisper fallback
+    - 本地视频文件：无 CC 字幕可下载，直接 ffmpeg 提音频 → 百炼 ASR
+    - 视频链接：CC 字幕优先 → 百炼 ASR fallback
     """
     is_local = Path(video_ref).is_file()
     if is_local:
@@ -171,19 +177,19 @@ async def _transcribe_real(video_ref: str, settings: Settings) -> TranscriptResu
             if result is not None and result.text.strip():
                 logger.info("[video_to_text] 命中 CC 字幕（source=%s）", result.source)
                 return result
-            logger.info("[video_to_text] 无可用 CC 字幕，fallback 到 Whisper 转写")
+            logger.info("[video_to_text] 无可用 CC 字幕，fallback 到阿里百炼 ASR 转写")
         else:
-            logger.info("[video_to_text] 本地视频文件，直接 Whisper 转写（无 CC 字幕级）")
+            logger.info("[video_to_text] 本地视频文件，直接提音频 → 阿里百炼 ASR 转写（无 CC 字幕级）")
 
-        # 1b/2. 提取音频 → Whisper 转写（URL 走 yt-dlp，本地文件走 ffmpeg）
+        # 1b/2. 提取音频 → 阿里百炼 ASR 转写（URL 走 yt-dlp，本地文件走 ffmpeg）
         result = await _try_whisper_transcription(video_ref, work, settings)
         if result is not None and result.text.strip():
-            logger.info("[video_to_text] Whisper 转写完成（source=%s）", result.source)
+            logger.info("[video_to_text] 阿里百炼 ASR 转写完成（source=%s）", result.source)
             return result
 
         # 3. 全部失败
         raise RuntimeError(
-            f"视频转写失败：既无 CC 字幕，Whisper 也未产出结果。源={video_ref}"
+            f"视频转写失败：既无 CC 字幕，阿里百炼 ASR 也未产出结果。源={video_ref}"
         )
 
 
@@ -221,13 +227,16 @@ async def _try_cc_subtitles(video_url: str, work: Path) -> Optional[TranscriptRe
 async def _try_whisper_transcription(
     video_source: str, work: Path, settings: Settings
 ) -> Optional[TranscriptResult]:
-    """第 2 级：提取音频 → Whisper 转写。
+    """第 2 级：提取音频 → 阿里百炼 ASR 转写。
+
+    （函数名保留 _try_whisper_transcription 以减少改动面；实际转写引擎
+    已从本地 Whisper 切换为阿里百炼 qwen-audio-3.0-asr-flash。）
 
     video_source 可为视频 URL（yt-dlp 提音频）或本地文件（ffmpeg 直接提音频）。
     """
     if not _has_ffmpeg():
         logger.error(
-            "[video_to_text] ffmpeg 不在 PATH，无法提取音频做 Whisper 转写。"
+            "[video_to_text] ffmpeg 不在 PATH，无法提取音频做 ASR 转写。"
             "请安装 ffmpeg（https://ffmpeg.org）后重试，或仅使用有 CC 字幕的视频。"
         )
         return None
@@ -262,78 +271,225 @@ async def _try_whisper_transcription(
         return None
     audio_file = audio_files[0]
 
-    # Whisper 转写（在线程池跑，避免阻塞事件循环）
-    srt_text = await asyncio.to_thread(
-        _whisper_transcribe, str(audio_file), str(work), settings
-    )
-    if not srt_text.strip():
+    # [已停用 2026-09-20] 本地 Whisper 转写（faster-whisper/openai-whisper）：
+    # CPU 转写过慢（30 分钟音频实测 32.4 分钟），改用阿里百炼云端 ASR。
+    # 原代码：
+    #     srt_text = await asyncio.to_thread(
+    #         _whisper_transcribe, str(audio_file), str(work), settings
+    #     )
+    #     if not srt_text.strip():
+    #         return None
+    #     srt_path = work / "whisper.srt"
+    #     srt_path.write_text(srt_text, encoding="utf-8")
+    #     text = _srt_to_text(srt_text)
+    #     return TranscriptResult(text=text, source="whisper", srt_path=str(srt_path))
+
+    # 阿里百炼云端 ASR（在线程池跑，避免阻塞事件循环；产出纯文本，无时间戳）
+    text = await asyncio.to_thread(_dashscope_asr_transcribe, str(audio_file), settings)
+    if not text.strip():
         return None
 
-    srt_path = work / "whisper.srt"
-    srt_path.write_text(srt_text, encoding="utf-8")
-    text = _srt_to_text(srt_text)
-    return TranscriptResult(text=text, source="whisper", srt_path=str(srt_path))
+    raw_path = work / "dashscope_asr.txt"
+    raw_path.write_text(text, encoding="utf-8")
+    return TranscriptResult(text=text, source="dashscope_asr", srt_path=str(raw_path))
 
 
-def _whisper_transcribe(audio_path: str, out_dir: str, settings: Settings) -> str:
-    """同步 Whisper 转写 → SRT 字符串。"""
-    if settings.whisper_backend == "openai-whisper":
-        return _whisper_openai(audio_path, settings)
-    return _whisper_faster(audio_path, settings)
+# ---------------------------------------------------------------------------
+# [已停用 2026-09-20] 本地 Whisper 转写（faster-whisper / openai-whisper）
+# 原因：CPU 本地转写过慢（30 分钟音频实测需 32.4 分钟），远超 MCP 同步超时；
+# 已改用下方阿里百炼云端 ASR（qwen-audio-3.0-asr-flash）。
+# 如需回退：取消下方注释，并恢复 _try_whisper_transcription 中的原调用点。
+# ---------------------------------------------------------------------------
+# def _whisper_transcribe(audio_path: str, out_dir: str, settings: Settings) -> str:
+#     """同步 Whisper 转写 → SRT 字符串。"""
+#     if settings.whisper_backend == "openai-whisper":
+#         return _whisper_openai(audio_path, settings)
+#     return _whisper_faster(audio_path, settings)
+#
+#
+# def _whisper_faster(audio_path: str, settings: Settings) -> str:
+#     """faster-whisper 转写（默认，轻量，无需完整 torch）。"""
+#     try:
+#         from faster_whisper import WhisperModel  # type: ignore
+#     except ImportError as e:
+#         raise RuntimeError(
+#             "faster-whisper 未安装。pip install faster-whisper，"
+#             "或在 .env 切换 WHISPER_BACKEND=openai-whisper。"
+#         ) from e
+#
+#     logger.info("[whisper] faster-whisper 加载模型 %s (device=%s, compute=%s) ...",
+#                 settings.whisper_model, settings.whisper_device, settings.whisper_compute_type)
+#     model = WhisperModel(
+#         settings.whisper_model,
+#         device=settings.whisper_device,
+#         compute_type=settings.whisper_compute_type,
+#     )
+#     segments, info = model.transcribe(
+#         audio_path,
+#         language=settings.whisper_language,
+#         vad_filter=True,
+#         beam_size=5,
+#     )
+#     logger.info("[whisper] 检测语言=%s 概率=%.2f", info.language, info.language_probability)
+#
+#     lines, idx = [], 1
+#     for seg in segments:
+#         lines.append(_format_srt_block(idx, seg.start, seg.end, seg.text.strip()))
+#         idx += 1
+#     return "\n".join(lines)
+#
+#
+# def _whisper_openai(audio_path: str, settings: Settings) -> str:
+#     """openai-whisper 转写（精度高但依赖 torch，较重）。"""
+#     try:
+#         import whisper  # type: ignore  # openai-whisper
+#     except ImportError as e:
+#         raise RuntimeError(
+#             "openai-whisper 未安装。pip install openai-whisper，"
+#             "或在 .env 切换 WHISPER_BACKEND=faster-whisper。"
+#         ) from e
+#
+#     logger.info("[whisper] openai-whisper 加载模型 %s ...", settings.whisper_model)
+#     model = whisper.load_model(settings.whisper_model, device=settings.whisper_device)
+#     result = model.transcribe(
+#         audio_path, language=settings.whisper_language, task="transcribe"
+#     )
+#     lines, idx = [], 1
+#     for seg in result.get("segments", []):
+#         lines.append(_format_srt_block(idx, seg["start"], seg["end"], seg["text"].strip()))
+#         idx += 1
+#     return "\n".join(lines)
 
 
-def _whisper_faster(audio_path: str, settings: Settings) -> str:
-    """faster-whisper 转写（默认，轻量，无需完整 torch）。"""
-    try:
-        from faster_whisper import WhisperModel  # type: ignore
-    except ImportError as e:
+# ---------------------------------------------------------------------------
+# 阿里百炼（DashScope）云端 ASR —— 替代本地 Whisper
+# ---------------------------------------------------------------------------
+
+_DASHSCOPE_ASR_URL = (
+    "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
+)
+_DASHSCOPE_ASR_TIMEOUT_SECONDS = 300  # 云端转写一般 10s~3min，留足余量
+
+
+def _dashscope_asr_transcribe(audio_path: str, settings: Settings) -> str:
+    """阿里百炼 qwen-audio-3.0-asr-flash 云端转写 → 纯文本。
+
+    对应 REST 调用（X-DashScope-SSE: disable，非流式）::
+
+        POST https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
+        Authorization: Bearer $DASHSCOPE_API_KEY
+        {"model": "qwen-audio-3.0-asr-flash",
+         "input": {"messages": [{"role": "user", "content": [
+             {"type": "input_audio", "input_audio": {"data": "<音频URL>"}}]}]},
+         "parameters": {"format": "wav", "sample_rate": "16000"}}
+
+    音频引用规则：
+    - 本地文件 → base64 data URI（data:audio/wav;base64,...）内联上传
+      （上游 ffmpeg/yt-dlp 已统一产出 16kHz 单声道 wav，与 parameters 对齐）
+    - 公网 http(s) URL → 直接透传
+    """
+    api_key = settings.dashscope_api_key
+    if not api_key:
         raise RuntimeError(
-            "faster-whisper 未安装。pip install faster-whisper，"
-            "或在 .env 切换 WHISPER_BACKEND=openai-whisper。"
-        ) from e
+            "DASHSCOPE_API_KEY 未配置。请在 .env 设置 DASHSCOPE_API_KEY"
+            "（阿里百炼 API Key，https://bailian.console.aliyun.com）后重试。"
+        )
 
-    logger.info("[whisper] faster-whisper 加载模型 %s (device=%s, compute=%s) ...",
-                settings.whisper_model, settings.whisper_device, settings.whisper_compute_type)
-    model = WhisperModel(
-        settings.whisper_model,
-        device=settings.whisper_device,
-        compute_type=settings.whisper_compute_type,
+    if re.match(r"^https?://", audio_path, re.IGNORECASE):
+        audio_ref = audio_path
+        logger.info("[dashscope-asr] 公网音频 URL 直接透传: %s", audio_path)
+    else:
+        data = Path(audio_path).read_bytes()
+        if len(data) > 100 * 1024 * 1024:
+            logger.warning(
+                "[dashscope-asr] 音频文件 %.1f MB，超过云端单请求建议上限，可能被拒绝",
+                len(data) / 1024 / 1024,
+            )
+        audio_ref = (
+            "data:audio/" + settings.dashscope_asr_format
+            + ";base64," + base64.b64encode(data).decode("ascii")
+        )
+        logger.info(
+            "[dashscope-asr] 本地音频 %s（%.2f MB）→ base64 data URI 内联上传",
+            audio_path, len(data) / 1024 / 1024,
+        )
+
+    payload = {
+        "model": settings.dashscope_asr_model,
+        "input": {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_audio",
+                            "input_audio": {"data": audio_ref},
+                        }
+                    ],
+                }
+            ]
+        },
+        "parameters": {
+            "format": settings.dashscope_asr_format,
+            "sample_rate": str(settings.dashscope_asr_sample_rate),
+        },
+    }
+
+    req = urllib.request.Request(
+        _DASHSCOPE_ASR_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "X-DashScope-SSE": "disable",
+        },
+        method="POST",
     )
-    segments, info = model.transcribe(
-        audio_path,
-        language=settings.whisper_language,
-        vad_filter=True,
-        beam_size=5,
+    logger.info(
+        "[dashscope-asr] 调用百炼 ASR（model=%s, format=%s, sample_rate=%d）...",
+        settings.dashscope_asr_model,
+        settings.dashscope_asr_format,
+        settings.dashscope_asr_sample_rate,
     )
-    logger.info("[whisper] 检测语言=%s 概率=%.2f", info.language, info.language_probability)
-
-    lines, idx = [], 1
-    for seg in segments:
-        lines.append(_format_srt_block(idx, seg.start, seg.end, seg.text.strip()))
-        idx += 1
-    return "\n".join(lines)
-
-
-def _whisper_openai(audio_path: str, settings: Settings) -> str:
-    """openai-whisper 转写（精度高但依赖 torch，较重）。"""
     try:
-        import whisper  # type: ignore  # openai-whisper
-    except ImportError as e:
-        raise RuntimeError(
-            "openai-whisper 未安装。pip install openai-whisper，"
-            "或在 .env 切换 WHISPER_BACKEND=faster-whisper。"
-        ) from e
+        with urllib.request.urlopen(req, timeout=_DASHSCOPE_ASR_TIMEOUT_SECONDS) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="ignore")[:500]
+        raise RuntimeError(f"阿里百炼 ASR 请求失败 HTTP {e.code}: {detail}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"阿里百炼 ASR 网络错误: {e.reason}") from e
 
-    logger.info("[whisper] openai-whisper 加载模型 %s ...", settings.whisper_model)
-    model = whisper.load_model(settings.whisper_model, device=settings.whisper_device)
-    result = model.transcribe(
-        audio_path, language=settings.whisper_language, task="transcribe"
+    text = _extract_dashscope_text(body)
+    if not text:
+        raise RuntimeError(
+            "阿里百炼 ASR 未返回文本，响应: "
+            + json.dumps(body, ensure_ascii=False)[:500]
+        )
+    logger.info(
+        "[dashscope-asr] 转写完成，共 %d 字符（request_id=%s）",
+        len(text), body.get("request_id", "n/a"),
     )
-    lines, idx = [], 1
-    for seg in result.get("segments", []):
-        lines.append(_format_srt_block(idx, seg["start"], seg["end"], seg["text"].strip()))
-        idx += 1
-    return "\n".join(lines)
+    return text.strip()
+
+
+def _extract_dashscope_text(body: dict) -> str:
+    """从 DashScope multimodal-generation 响应中提取转写文本（多形态容错）。"""
+    output = body.get("output") or {}
+    # 形态 1（标准）：output.choices[0].message.content[0].text
+    for choice in output.get("choices") or []:
+        msg = choice.get("message") or {}
+        content = msg.get("content")
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get("text"):
+                    return str(part["text"])
+        elif isinstance(content, str) and content.strip():
+            return content
+    # 形态 2：output.text
+    if output.get("text"):
+        return str(output["text"])
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -423,8 +579,8 @@ def _stub_transcript(video_ref: str) -> str:
         f"[STUB 视频转写占位输出]\n"
         f"源视频: {video_ref}\n"
         f"（此处应为真实转写文本。在 .env 设置 VIDEO_TO_TEXT_MCP_ENABLED=true，"
-        f"并确保 yt-dlp / ffmpeg / faster-whisper 已安装，即可启用真实转写：\n"
+        f"并配置 DASHSCOPE_API_KEY、确保 yt-dlp / ffmpeg 已安装，即可启用真实转写：\n"
         f"  1. 优先下载平台 CC 字幕（zh-Hans/zh-CN/zh/ai-zh）\n"
-        f"  2. 无 CC 字幕时提取音频用 Whisper 转写）\n\n"
+        f"  2. 无 CC 字幕时提取音频用阿里百炼 ASR（qwen-audio-3.0-asr-flash）转写）\n\n"
         f"占位内容：本段为模拟转写，用于验证 Ingestion Agent 的结构化链路是否畅通。"
     )
