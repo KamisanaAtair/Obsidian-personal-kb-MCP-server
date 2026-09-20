@@ -22,9 +22,8 @@ WorkBuddy 是"大脑"（对话），本服务是"手脚"（取原文、建索引
 ## 第 1 步：下载 ZIP
 
 1. 打开仓库页面：https://github.com/KamisanaAtair/Obsidian-personal-kb-MCP-server
-2. 如果你要用的是某个分支（如果你什么都不知道，下载——> ASR 分支 `feat/asr-dashscope-api-key` 喵），先点页面左上角的分支下拉框切换到该分支；用默认分支则跳过。
-3. 点绿色的 **Code** 按钮 → 点 **Download ZIP**。
-4. 得到一个 `Obsidian-personal-kb-MCP-server...zip` 文件（一般在"下载"文件夹里）。
+2. 点绿色的 **Code** 按钮 → 点 **Download ZIP**。
+3. 得到一个 `Obsidian-personal-kb-MCP-server...zip` 文件（一般在"下载"文件夹里）。
 
 检查点：下载文件夹里能看到这个 zip 文件。
 
