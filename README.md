@@ -50,7 +50,7 @@ python -m mcp_server.server
 
 Host 必须在**同一个服务进程**内完成 prepare → 生成 → finalize；`prepare_id` 默认 60 分钟有效，重启即失效。具体连接参数、交互示例及调试命令见 [Host 使用说明](docs/HOST_USAGE.md)。
 
-WorkBuddy 用户可按 [接入指南](docs/workbuddy.md) 合并 [通用 MCP 配置示例](examples/workbuddy.mcp.json)，其中包含服务 description 和四工具工作约定。示例中的绝对路径须先替换。
+WorkBuddy 用户可按 [接入指南](docs/workbuddy.md) 合并 [通用 MCP 配置示例](examples/workbuddy.mcp.json)，其中包含服务 description 和四工具工作约定。示例中的绝对路径须先替换。零基础用户（含从 ZIP 开始、不熟悉命令行）可直接按 [从 ZIP 到 WorkBuddy 的零基础配置指南](docs/SETUP_FROM_ZIP.md) 操作，配合仓库根目录的 `personal-kb-mcp-setup` skill 自动完成依赖安装与密钥配置。
 
 ## 验证与设计
 
