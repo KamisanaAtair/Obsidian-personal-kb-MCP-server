@@ -1,8 +1,26 @@
 # Personal KB — host-delegated
 
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm_Noncommercial_1.0.0-orange)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue?logo=python&logoColor=white)](pyproject.toml)
+[![Platforms](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows_%7C_macOS_%7C_Linux-lightgrey)](#快速开始零基础先看这里)
+[![MCP: stdio server](https://img.shields.io/badge/MCP-stdio_server-8A2BE2)](mcp_server/server.py)
+[![Branch: feat/asr-dashscope-api-key](https://img.shields.io/badge/%E5%88%86%E6%94%AF-feat%2Fasr--dashscope--api--key-teal)](https://github.com/KamisanaAtair/Obsidian-personal-kb-MCP-server/tree/feat/asr-dashscope-api-key)
+
 把 Obsidian 笔记库接入 MCP Host 的个人知识库服务，版本 **0.2.0**。本版将笔记整理、关联理由和答案生成交给 Host 的对话模型；服务端保留原文获取、本地检索、来源校验和草稿落盘。
 
 “转嫁成本”指服务端不再另行调用生成式 LLM；生成仍消耗 Host 原有额度和上下文，本地 bge-m3、视频 ASR、模型下载和磁盘也仍有成本。本服务不调用 MCP sampling。
+
+## 快速开始（零基础，先看这里）
+
+完全没接触过命令行、MCP 或 Python？直接照着这份手把手指南做就行：
+
+### [从 ZIP 到 WorkBuddy 的零基础配置指南（点我）](docs/SETUP_FROM_ZIP.md)
+
+全程只需要你亲手做四件事：**解压 → 复制一个文件夹 → 对 WorkBuddy 说一句话 → 填一串密钥**。依赖安装、模型下载、密钥文件生成全部自动完成，而且只发生一次——以后执行不会再出现这些步骤。
+
+ZIP 下载（内容为 asr 分支 `feat/asr-dashscope-api-key` 的最新代码，GitHub 自动打包，永远是最新的）：
+
+[![Download ZIP](https://img.shields.io/badge/Download_ZIP-asr%E5%88%86%E6%94%AF%E6%9C%80%E6%96%B0%E4%BB%A3%E7%A0%81-2ea44f?style=for-the-badge&logo=github)](https://github.com/KamisanaAtair/Obsidian-personal-kb-MCP-server/archive/refs/heads/feat/asr-dashscope-api-key.zip)
 
 ## 四个工具
 
@@ -17,10 +35,10 @@
 
 ## 本地启动
 
-克隆 **`codex/host-delegated`** 分支，或解压本版源码包并进入源码目录。需要 **Python 3.11 或更高版本**：
+克隆本分支 **`feat/asr-dashscope-api-key`**，或解压上方 ZIP 并进入源码目录。需要 **Python 3.11 或更高版本**：
 
 ```bash
-git clone --branch codex/host-delegated https://github.com/KamisanaAtair/Obsidian-personal-kb-MCP-server.git
+git clone --branch feat/asr-dashscope-api-key https://github.com/KamisanaAtair/Obsidian-personal-kb-MCP-server.git
 cd Obsidian-personal-kb-MCP-server
 ```
 
@@ -50,7 +68,7 @@ python -m mcp_server.server
 
 Host 必须在**同一个服务进程**内完成 prepare → 生成 → finalize；`prepare_id` 默认 60 分钟有效，重启即失效。具体连接参数、交互示例及调试命令见 [Host 使用说明](docs/HOST_USAGE.md)。
 
-WorkBuddy 用户可按 [接入指南](docs/workbuddy.md) 合并 [通用 MCP 配置示例](examples/workbuddy.mcp.json)，其中包含服务 description 和四工具工作约定。示例中的绝对路径须先替换。零基础用户（含从 ZIP 开始、不熟悉命令行）可直接按 [从 ZIP 到 WorkBuddy 的零基础配置指南](docs/SETUP_FROM_ZIP.md) 操作，配合仓库根目录的 `personal-kb-mcp-setup` skill 自动完成依赖安装与密钥配置。
+WorkBuddy 用户可按 [接入指南](docs/workbuddy.md) 合并 [通用 MCP 配置示例](examples/workbuddy.mcp.json)，其中包含服务 description 和四工具工作约定。示例中的绝对路径须先替换。零基础用户请从上方的 [快速开始](#快速开始零基础先看这里) 进入。
 
 ## 验证与设计
 
