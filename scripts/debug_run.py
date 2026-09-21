@@ -1,4 +1,14 @@
-"""host-delegated 调试入口：返回数据/提示词，同进程模拟 Host 回调。"""
+"""host-delegated 调试入口：返回数据/提示词，同进程模拟 Host 回调。
+
+[适配层] 本脚本不属于任何一条链——它是四条链的命令行调试入口。
+
+    命令                    链
+    prepare / ingest        链1+链2 摄取（同进程模拟 prepare→Host→finalize）
+    correlate               链3 关联发现
+    query                   链4 知识库问答
+    index                   src/common/tools/retriever.py 的索引刷新（被链3/链4 触发的那部分）
+    status                  只读巡检（Vault / 配置 / 笔记计数）
+"""
 from __future__ import annotations
 
 import asyncio
@@ -13,7 +23,7 @@ if __package__ in (None, ""):
 import typer
 from rich.console import Console
 
-from config.settings import get_settings
+from src.common.settings import get_settings
 
 console = Console()
 app = typer.Typer(help="host-delegated 调试：生成工作由 Host 完成。", no_args_is_help=True)
@@ -36,7 +46,7 @@ def ingest(
 ):
     """同进程 prepare → 显示 prompt → 读取 Host 正文 → finalize。"""
     _setup_logging()
-    from core.graph import ingestion_finalize_graph, ingestion_prepare_graph
+    from src.common.graph_registry import ingestion_finalize_graph, ingestion_prepare_graph
     if source_type not in ("", "video_url", "video_file", "raw_text", "note_path"):
         raise typer.BadParameter("未知 source_type")
 
@@ -101,14 +111,14 @@ def query(question: str):
 def index():
     """重建 promoted 笔记索引（使用本地 bge-m3）。"""
     _setup_logging()
-    from core.tools.retriever import index_vault
+    from src.common.tools.retriever import index_vault
     _show({"indexed_notes": index_vault()})
 
 
 @app.command()
 def status():
     """查看配置与笔记统计；不加载 Embedding 模型。"""
-    from core.tools.vault_io import list_promoted_notes, list_staged_notes
+    from src.vault_io import list_promoted_notes, list_staged_notes
     s = get_settings()
     _show({
         "architecture": "host-delegated",

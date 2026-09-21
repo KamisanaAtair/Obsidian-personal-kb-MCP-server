@@ -21,7 +21,7 @@ class TestEmbeddings(Embeddings):
 
 @pytest.fixture(autouse=True)
 def isolated_settings(tmp_path, monkeypatch):
-    from config.settings import get_settings
+    from src.common.settings import get_settings
     config = {
         "VAULT_ROOT": str(tmp_path / "vault"), "VAULT_AUTODISCOVER": "false",
         "VAULT_INBOX_DIR": "Inbox", "NOTE_STATUS_FIELD": "status",
@@ -34,7 +34,7 @@ def isolated_settings(tmp_path, monkeypatch):
     for key, value in config.items():
         monkeypatch.setenv(key, value)
     get_settings.cache_clear()
-    from core.tools import session_store
+    from src.common.tools import session_store
     session_store._sessions.clear()
     yield get_settings()
     session_store._sessions.clear()
@@ -43,7 +43,7 @@ def isolated_settings(tmp_path, monkeypatch):
 
 @pytest.fixture
 def local_retrieval(monkeypatch):
-    from core.tools import hybrid_search, retriever
+    from src.common.tools import hybrid_search, retriever
     embeddings = TestEmbeddings()
     monkeypatch.setattr(retriever, "get_local_embeddings", lambda settings=None: embeddings)
     monkeypatch.setattr(hybrid_search, "get_local_embeddings", lambda settings=None: embeddings)

@@ -3,10 +3,10 @@
     "."
   ],
   "graphs": {
-    "ingestion_prepare": "./core/graph.py:ingestion_prepare_graph",
-    "ingestion_finalize": "./core/graph.py:ingestion_finalize_graph",
-    "correlation": "./core/graph.py:correlation_graph",
-    "retrieval_qa": "./core/graph.py:retrieval_graph"
+    "ingestion_prepare": "./src/ingest_prepare/graph.py:ingestion_prepare_graph",
+    "ingestion_finalize": "./src/ingest_finalize/graph.py:ingestion_finalize_graph",
+    "correlation": "./src/correlate/graph.py:correlation_graph",
+    "retrieval_qa": "./src/query/graph.py:retrieval_graph"
   },
   "env": ".env"
 }

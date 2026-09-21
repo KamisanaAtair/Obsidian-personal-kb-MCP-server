@@ -7,9 +7,10 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from config.settings import Settings
-from core.graph import ingestion_finalize_graph, ingestion_prepare_graph
-from core.tools import session_store, vault_io
+from src.common.settings import Settings
+from src.common.graph_registry import ingestion_finalize_graph, ingestion_prepare_graph
+from src import vault_io
+from src.common.tools import session_store
 from mcp_server.server import (
     ingest_content_finalize,
     ingest_content_prepare,
@@ -118,8 +119,8 @@ async def test_note_path_graph_compatibility(isolated_settings):
 
 @pytest.mark.parametrize("exists", [False, True])
 async def test_correlation_gate_before_retrieval(exists, isolated_settings, monkeypatch):
-    from core.nodes import correlation
-    from core.tools import retriever
+    from src.correlate.nodes import correlation
+    from src.common.tools import retriever
     if exists:
         write_note(isolated_settings, "draft.md", "staged", "不可检索内容")
     refresh = Mock(side_effect=AssertionError("must not refresh"))
@@ -132,8 +133,8 @@ async def test_correlation_gate_before_retrieval(exists, isolated_settings, monk
 
 
 async def test_correlation_candidates_without_generation(isolated_settings, monkeypatch):
-    from core.nodes import correlation
-    from core.tools import retriever
+    from src.correlate.nodes import correlation
+    from src.common.tools import retriever
     write_note(isolated_settings, "source.md", "promoted", "RAG 检索")
     monkeypatch.setattr(retriever, "ensure_index_fresh", lambda settings: {})
     monkeypatch.setattr(correlation, "retrieve", lambda *args, **kwargs: [
@@ -147,7 +148,7 @@ async def test_correlation_candidates_without_generation(isolated_settings, monk
 
 @pytest.mark.parametrize("hybrid", [False, True])
 async def test_real_chroma_retrieval_and_demotion(hybrid, isolated_settings, local_retrieval):
-    from core.tools import retriever
+    from src.common.tools import retriever
     from langchain_chroma import Chroma
     isolated_settings.hybrid_search_enabled = hybrid
     write_note(isolated_settings, "approved.md", "promoted", "可信的 RAG 检索资料")
@@ -179,6 +180,6 @@ async def test_real_empty_index_no_hit(isolated_settings, local_retrieval):
 
 
 def test_frontmatter_serializes_as_mapping():
-    from core.tools.obsidian_skill import _ensure_frontmatter
+    from src.ingest_finalize.tools.obsidian_skill import _ensure_frontmatter
     value = _ensure_frontmatter("# 文本", "raw_text", "来源")
     assert isinstance(yaml.safe_load(value.split("---", 2)[1]), dict)

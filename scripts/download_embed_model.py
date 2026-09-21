@@ -39,7 +39,7 @@ def main(
     """下载 bge-m3 模型到本地缓存目录。"""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-    from config.settings import Settings
+    from src.common.settings import Settings
 
     settings = Settings(embed_model_source=source)
     console.print(Panel.fit(
@@ -51,7 +51,7 @@ def main(
         style="cyan",
     ))
 
-    from core.tools.embeddings import ensure_model_downloaded
+    from src.common.tools.embeddings import ensure_model_downloaded
 
     try:
         path = ensure_model_downloaded(settings)

@@ -1,5 +1,13 @@
 """Host-delegated MCP Server：四个工具，生成式判断由 Host 的对话模型执行。
 
+[适配层] 本文件不属于任何一条链——它是四条链的对外入口薄适配，工具名与参数是硬契约。
+
+    工具名                        链                 链目录
+    ingest_content_prepare     链1 摄取 prepare    src/ingest_prepare/
+    ingest_content_finalize    链2 摄取 finalize   src/ingest_finalize/
+    trigger_correlation        链3 关联发现        src/correlate/
+    query_kb                   链4 知识库问答      src/query/
+
 摄取：prepare 返回原文和 prompt → Host 生成笔记 → finalize 写 staged 草稿。
 关联/问答：一次调用返回检索数据和 prompt，Host 生成最终结果，无需回传。
 不调用服务端生成模型，也不请求 MCP sampling。Promotion 仍需人工在 Obsidian 完成。
@@ -13,8 +21,8 @@ import logging
 
 from mcp.server.fastmcp import FastMCP
 
-from config.settings import get_settings
-from core.graph import (
+from src.common.settings import get_settings
+from src.common.graph_registry import (
     correlation_graph,
     ingestion_finalize_graph,
     ingestion_prepare_graph,

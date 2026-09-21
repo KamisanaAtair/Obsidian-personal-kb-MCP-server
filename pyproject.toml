@@ -57,7 +57,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["config*", "core*", "mcp_server*", "scripts*"]
+include = ["src*", "mcp_server*", "scripts*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
