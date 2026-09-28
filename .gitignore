@@ -43,3 +43,8 @@ local-validation/
 
 # MCP server prepare 结果恢复日志（本地调试/超时恢复用）
 logs/
+
+# Local-only installer inputs and project investigation memory
+/installer/vendor/
+/project-memory/
+.DS_Store

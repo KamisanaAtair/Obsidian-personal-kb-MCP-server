@@ -1,0 +1,10 @@
+{
+  "version": "0.3.0b1",
+  "python": "3.11.15",
+  "uv": "0.12.12",
+  "uv_archives": {
+    "windows-x64": {"file": "uv-x86_64-pc-windows-msvc.zip", "sha256": "3d54912924c36e862c14f427d04f2ed70a99e8001d1c30caa101f6d5711626d5"},
+    "macos-arm64": {"file": "uv-aarch64-apple-darwin.tar.gz", "sha256": "46740540b63fdee9a6cb2e19baf3f1f475b850c440a33e63455087a6871263f1"},
+    "macos-x64": {"file": "uv-x86_64-apple-darwin.tar.gz", "sha256": "0dc8cd6c961582b0d140b5398f96b23502885277fb3464241456a2435e460dfa"}
+  }
+}

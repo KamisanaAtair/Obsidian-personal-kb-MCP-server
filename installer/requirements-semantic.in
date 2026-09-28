@@ -1,0 +1,6 @@
+-r requirements-base.in
+chromadb==1.5.9
+langchain-chroma==1.1.0
+langchain-huggingface==1.2.2
+sentence-transformers==6.1.0
+modelscope==1.40.1

@@ -1,10 +1,17 @@
 [project]
 name = "personal-kb-multiagent"
-version = "0.2.0"
+version = "0.3.0b1"
 description = "host-delegated 个人知识库：本地检索与草稿落盘，生成工作交给 MCP Host"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "mcp==1.30.0",
+    "pydantic-settings==2.15.0",
+    "PyYAML==6.0.3",
+]
+
+[project.optional-dependencies]
+legacy = [
     # --- 图编排 ---
     "langgraph>=0.2.50",
     "langchain>=0.3.0",
@@ -25,11 +32,9 @@ dependencies = [
     # --- MCP Server（pin <2：2.0 移除了 FastMCP，1.x 才有 mcp.server.fastmcp）---
     "mcp>=1.0.0,<2.0.0",
 
-    # --- 视频转文档：yt-dlp 获取字幕/音频 + whisper 转写 ---
+    # --- 视频转文档：yt-dlp 获取字幕/音频 + 云端 ASR ---
     # 参考 wdkns/bilibili-render-pdf skill 的三级 fallback 方法论
     "yt-dlp>=2024.8.6",
-    # whisper：faster-whisper 轻量（避免拉起完整 torch）；可按需切换 openai-whisper
-    "faster-whisper>=1.0.3",
 
     # --- 配置与工具 ---
     "pydantic>=2.7.0",
@@ -40,7 +45,14 @@ dependencies = [
     "typer>=0.12.0",
 ]
 
-[project.optional-dependencies]
+semantic = [
+    "chromadb==1.5.9",
+    "langchain-chroma==1.1.0",
+    "langchain-huggingface==1.2.2",
+    "sentence-transformers==6.1.0",
+    "modelscope==1.40.1",
+]
+video = ["yt-dlp==2026.8.19", "imageio-ffmpeg==0.6.0"]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
@@ -50,6 +62,7 @@ dev = [
 
 [project.scripts]
 kb-debug = "scripts.debug_run:app"
+personal-kb = "local_app.server:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
@@ -57,10 +70,14 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["config*", "core*", "mcp_server*", "scripts*"]
+include = ["config*", "core*", "mcp_server*", "scripts*", "local_app*", "installer*"]
+
+[tool.setuptools.package-data]
+local_app = ["static/*"]
+installer = ["release.json", "requirements*.lock", "model-manifest.json"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "tests_local"]
 asyncio_mode = "auto"
 
 [tool.ruff]
