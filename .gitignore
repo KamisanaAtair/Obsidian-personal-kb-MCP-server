@@ -16,7 +16,7 @@ secrets.env
 .chroma_db/
 
 # 本地模型缓存（bge-m3 等，体积大不提交）
-models/
+/models/
 
 # IDE
 .vscode/

@@ -1,13 +1,15 @@
 [project]
 name = "personal-kb-multiagent"
-version = "0.3.0b1"
-description = "host-delegated 个人知识库：本地检索与草稿落盘，生成工作交给 MCP Host"
+version = "0.4.0b1"
+description = "本机个人知识库：可配置独立模型、本地检索、草稿审核与 MCP 客户端集成"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "mcp==1.30.0",
     "pydantic-settings==2.15.0",
     "PyYAML==6.0.3",
+    "httpx==0.28.1",
+    "keyring==25.7.0",
 ]
 
 [project.optional-dependencies]

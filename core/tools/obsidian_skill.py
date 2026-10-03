@@ -65,7 +65,9 @@ def _has_valid_frontmatter(content: str) -> bool:
     return "status" in metadata
 
 
-def _ensure_frontmatter(content: str, source_type: str, source_ref: str) -> str:
+def _ensure_frontmatter(
+    content: str, source_type: str, source_ref: str, *, created: str | None = None
+) -> str:
     """补全元数据，并用服务端会话的真实来源覆盖 Host 声明。
 
     无 frontmatter 时将全部输入保留为正文；已有 frontmatter 必须是合法 YAML
@@ -85,7 +87,10 @@ def _ensure_frontmatter(content: str, source_type: str, source_ref: str) -> str:
     metadata.setdefault("status", "staged")
     metadata["source_type"] = source_type
     metadata["source_ref"] = source_ref
-    metadata.setdefault("created", date.today().isoformat())
+    if created is not None:
+        metadata["created"] = created
+    else:
+        metadata.setdefault("created", date.today().isoformat())
     metadata.setdefault("tags", [])
     fm_text = yaml.safe_dump(metadata, allow_unicode=True, sort_keys=False).rstrip("\n")
     return f"---\n{fm_text}\n---\n{body}"
