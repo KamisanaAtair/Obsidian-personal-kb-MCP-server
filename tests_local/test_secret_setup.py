@@ -2,6 +2,7 @@
 
 import json
 
+import httpx
 import pytest
 
 from local_app.models import MemoryCredentialStore, ModelError, ModelService
@@ -31,6 +32,36 @@ def test_blank_template_preserves_manual_file_and_only_explicit_import(setup):
     assert "synthetic-import-key" not in secret.input.read_text()
     assert "synthetic-import-key" not in models.path.read_text()
     assert "synthetic-import-key" not in json.dumps(secret.status())
+
+
+@pytest.mark.parametrize("prefix,host", [
+    ("sk-ws-", "maas.qianwenaiapi.com"),
+    ("sk-sp-", "token-plan.maas.qianwenaiapi.com"),
+])
+def test_qwen_template_key_reaches_only_selected_endpoint(setup, prefix, host):
+    secret, models, identity = setup
+    key = prefix + "synthetic-template-no-real-access"
+    endpoint = "https://" + host + "/compatible-mode/v1"
+    models.save_config({"profile": {"id": identity, "base_url": endpoint}})
+    secret.input.write_text("API_KEY=" + key + "\n")
+    assert secret.import_secret(identity, "template")["source_cleared"]
+    seen = []
+
+    def handler(request):
+        seen.append(str(request.url))
+        assert str(request.url) == endpoint + "/chat/completions"
+        assert request.headers["Authorization"] == "Bearer " + key
+        return httpx.Response(200, text=(
+            'data: {"choices":[{"delta":{"content":"合成测试"},"finish_reason":"stop"}]}\n\n'
+            'data: [DONE]\n\n'
+        ))
+
+    models.client.close()
+    models.client = httpx.Client(transport=httpx.MockTransport(handler))
+    assert models.test_connection(identity)["success"]
+    assert len(seen) == 1
+    assert secret.input.read_text() == "API_KEY=\n"
+    assert key not in models.path.read_text() + json.dumps(models.public_config())
 
 
 def test_legacy_migration_retains_unrelated_fields_and_failed_store(setup, monkeypatch):

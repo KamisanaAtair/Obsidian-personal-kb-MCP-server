@@ -1,6 +1,6 @@
 [project]
 name = "personal-kb-multiagent"
-version = "0.5.0b2"
+version = "0.5.0b3"
 description = "本机个人知识库：可配置独立模型、本地检索、草稿审核与 MCP 客户端集成"
 readme = "README.md"
 requires-python = ">=3.11"

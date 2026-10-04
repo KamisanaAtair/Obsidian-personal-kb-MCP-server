@@ -1,3 +1,3 @@
 """User-managed local Personal KB runtime. Heavy features are loaded on demand."""
 
-__version__ = "0.5.0b2"
+__version__ = "0.5.0b3"

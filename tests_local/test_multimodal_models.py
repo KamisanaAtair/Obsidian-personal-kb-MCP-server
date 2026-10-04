@@ -185,6 +185,28 @@ def test_actual_png_is_sent_to_each_transport(service, provider):
     assert len(requests) == 1
 
 
+@pytest.mark.parametrize("host", ["maas.qianwenaiapi.com", "token-plan.maas.qianwenaiapi.com"])
+def test_qianwen_vision_uses_selected_chat_endpoint(service, host):
+    profile = add(
+        service, provider="qwen", base_url=f"https://{host}/compatible-mode/v1",
+        api_key="sk-sp-synthetic-no-real-access" if host.startswith("token-plan.") else "sk-ws-synthetic-no-real-access",
+        capabilities=["vision"], capability_models={"vision": "qwen3.7-plus", "asr": ""},
+    )
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        assert str(request.url) == f"https://{host}/compatible-mode/v1/chat/completions"
+        body = json.loads(request.content)
+        assert body["model"] == "qwen3.7-plus"
+        assert body["messages"][0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+        return success(request)
+
+    mock(service, handler)
+    assert service.test_connection(profile["id"], capability="vision")["success"] is True
+    assert len(requests) == 1
+
+
 @pytest.mark.parametrize(
     "bad",
     [
@@ -218,13 +240,15 @@ def test_oversize_png_dimensions_and_text_image_mismatch_rejected(service):
     assert exc.value.code == "unsupported_capability"
 
 
-def test_native_asr_same_region_audio_field_and_credential(service):
+@pytest.mark.parametrize("host", ["dashscope-intl.aliyuncs.com", "maas.qianwenaiapi.com"])
+def test_native_asr_same_region_audio_field_and_credential(service, host):
     profile = add(
         service,
         provider="qwen",
-        base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        base_url=f"https://{host}/compatible-mode/v1",
         api_key="synthetic-key",
         capabilities=["asr"],
+        capability_models={"vision": "", "asr": "qwen3-asr-flash"},
         model_id="",
     )
     snapshot = route(service, profile, "asr")
@@ -236,9 +260,10 @@ def test_native_asr_same_region_audio_field_and_credential(service):
             requests.append(request)
             assert (
                 str(request.url)
-                == "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
+                == f"https://{host}/api/v1/services/aigc/multimodal-generation/generation"
             )
             body = json.loads(request.content)
+            assert body["model"] == "qwen3-asr-flash"
             encoded = body["input"]["messages"][0]["content"][0]["audio"]
             assert encoded.startswith("data:audio/wav;base64,")
             assert base64.b64decode(encoded.split(",", 1)[1]) == expected
@@ -252,6 +277,37 @@ def test_native_asr_same_region_audio_field_and_credential(service):
         mock(service, handler)
         assert service.transcribe(snapshot, wav) == "合成转写"
     assert len(requests) == 1
+
+
+@pytest.mark.parametrize("url", [
+    "https://maas.qianwenaiapi.com.evil.invalid/compatible-mode/v1",
+    "https://fake.maas.qianwenaiapi.com/compatible-mode/v1",
+    "https://maas.qianwenaiapi.com:8443/compatible-mode/v1",
+    "https://maas.qianwenaiapi.com/unverified/path",
+])
+def test_qianwen_native_asr_rejects_similar_hosts_and_unverified_routes(service, url):
+    profile = add(service, provider="qwen", base_url=url, api_key="synthetic-no-real-access")
+    mock(service, lambda _: pytest.fail("invalid native ASR route must not reach HTTP"))
+    with pytest.raises(ModelError) as exc:
+        service.test_connection(profile["id"], capability="asr")
+    assert exc.value.code == "invalid_audio_endpoint"
+
+
+def test_token_plan_asr_reports_current_adapter_limit_without_request_or_fallback(service):
+    profile = add(
+        service, provider="qwen",
+        base_url="https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1",
+        api_key="sk-sp-synthetic-no-real-access", capabilities=["asr"],
+        capability_models={"vision": "", "asr": "qwen-audio-3.0-asr-flash"},
+    )
+    before = service.path.read_bytes()
+    mock(service, lambda _: pytest.fail("unsupported ASR must not send or fall back to paid API"))
+    with pytest.raises(ModelError) as exc:
+        service.test_connection(profile["id"], capability="asr")
+    assert exc.value.code == "unsupported_audio_api"
+    assert "本版尚未适配 Token Plan 套餐语音接口" in str(exc.value)
+    assert "为 ASR 单独配置已支持的服务" in str(exc.value)
+    assert service.path.read_bytes() == before
 
 
 def test_local_compatible_asr_multipart_no_key(service):

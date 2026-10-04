@@ -25,8 +25,11 @@ MAX_IMAGE_BYTES = 4 * 1024 * 1024
 MAX_IMAGE_PIXELS = 4_194_304
 MAX_AUDIO_BYTES = 6 * 1024 * 1024
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+# Qwen3-ASR keeps its audio input and choices output on the new standard host:
+# https://platform.qianwenai.com/docs/api-reference/speech-recognition/qwen-asr/api-reference
 DASHSCOPE_HOSTS = {
     "dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com",
+    "maas.qianwenaiapi.com",
 }
 
 
@@ -139,13 +142,23 @@ def audio_request(profile, audio):
     if profile["audio_api_style"] != "dashscope":
         raise ModelError("invalid_audio_api_style", "语音转写接口类型无效。")
     url = urlsplit(profile["base_url"])
+    if url.hostname == "token-plan.maas.qianwenaiapi.com":
+        # The plan's qwen-audio-3.0-asr-flash needs a different adapter; do not
+        # substitute a standard billing endpoint or assume Qwen3-ASR compatibility.
+        raise ModelError(
+            "unsupported_audio_api",
+            "本版尚未适配 Token Plan 套餐语音接口，请为 ASR 单独配置已支持的服务；"
+            "例如千问按量 API 的 qwen3-asr-flash。不会自动切换地址或计费方式。",
+        )
     official_host = url.hostname in DASHSCOPE_HOSTS or bool(re.fullmatch(
         r"[a-z0-9][a-z0-9-]{0,63}\.(cn-beijing|ap-southeast-1|us-east-1)\.maas\.aliyuncs\.com",
         url.hostname or "",
     ))
     if (url.scheme != "https" or not official_host or url.port not in {None, 443}
             or url.path not in {"", "/compatible-mode/v1", "/api/v1"}):
-        raise ModelError("invalid_audio_endpoint", "DashScope 原生 ASR 须使用已支持地域的官方 HTTPS 地址。")
+        raise ModelError(
+            "invalid_audio_endpoint", "DashScope 原生 ASR 须使用本版已支持的千问或百炼官方 HTTPS 地址。"
+        )
     endpoint = urlunsplit((url.scheme, url.netloc,
                           "/api/v1/services/aigc/multimodal-generation/generation", "", ""))
     return endpoint, {"json": {

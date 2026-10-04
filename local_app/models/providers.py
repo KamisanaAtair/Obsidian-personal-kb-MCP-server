@@ -1,9 +1,9 @@
 """Provider presets and explicit capability mapping, checked against official docs.
 
 Sources (Qwen connection guidance rechecked 2026-10-04):
-https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope
-https://help.aliyun.com/zh/model-studio/base-url
-https://help.aliyun.com/zh/model-studio/coding-plan
+https://platform.qianwenai.com/docs/api-reference/preparation/api-key
+https://platform.qianwenai.com/docs/developer-guides/clients-and-developer-tools/chatbox
+https://platform.qianwenai.com/docs/token-plan/overview
 https://help.aliyun.com/zh/model-studio/deep-thinking
 https://huggingface.co/moonshotai/Kimi-K2.5
 https://raw.githubusercontent.com/MoonshotAI/kimi-cli/main/packages/kosong/src/kosong/chat_provider/kimi.py
@@ -35,9 +35,9 @@ LEGACY_QWEN3_ALWAYS_THINK_TEMPLATE = (
 
 PROVIDERS = {
     "qwen": {
-        "name": "Qwen · 百炼按量 API",
-        "default_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "default_model": "qwen-plus",
+        "name": "千问AI平台",
+        "default_base_url": "https://maas.qianwenaiapi.com/compatible-mode/v1",
+        "default_model": "qwen3.7-plus",
         "api_style": "openai_chat",
         "thinking_models": [
             "qwen-plus",
@@ -50,20 +50,23 @@ PROVIDERS = {
             "qwen3.7-plus",
             "qwen3.8-max",
         ],
-        "help_url": "https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope",
+        "help_url": "https://platform.qianwenai.com/docs/api-reference/preparation/api-key",
         "hint": (
-            "普通百炼按量 API，非 Coding Plan 套餐。Key、地域和业务空间须匹配；"
-            "支持控制台提供的业务空间专属 Base URL。"
+            "先选择按量 API 或 Token Plan，再填写对应凭据；两种方式的 Key 与地址须配套。"
+            "已保存的旧百炼连接仍保留原地址，修改域名时须重新填写 Key。"
         ),
-        "regions": [
-            {"name": "中国北京", "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
+        "connection_options": [
             {
-                "name": "新加坡",
-                "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+                "id": "standard",
+                "name": "按量 API",
+                "base_url": "https://maas.qianwenaiapi.com/compatible-mode/v1",
+                "hint": "使用千问AI平台通用 API Key；按量计费与 Token Plan 的凭据和地址不可混用。",
             },
             {
-                "name": "美国弗吉尼亚",
-                "base_url": "https://dashscope-us.aliyuncs.com/compatible-mode/v1",
+                "id": "token_plan",
+                "name": "Token Plan",
+                "base_url": "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1",
+                "hint": "个人版与团队版共用此地址；使用对应订阅的专属 API Key，可用模型以套餐为准。",
             },
         ],
     },
@@ -73,7 +76,7 @@ PROVIDERS = {
         "default_model": "kimi-k2.5",
         "api_style": "openai_chat",
         "thinking_models": ["kimi-k2.5"],
-        "help_url": "https://platform.kimi.com/docs/guide/use-thinking-models",
+        "help_url": "https://platform.kimi.com/docs/get-api-key",
         "hint": "使用 Kimi 开放平台 API Key；Kimi Code 订阅凭据不能替代开放平台密钥。",
     },
     "glm": {

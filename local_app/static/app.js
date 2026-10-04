@@ -1,5 +1,60 @@
 (() => {
   'use strict';
+  const viewNames = {home:'工作台',tasks:'本地任务',models:'我的模型','model-new':'添加模型连接','model-edit':'编辑模型连接','model-routing':'模型用途',help:'使用帮助'};
+  const helpTopics = {
+    saved: {title:'添加的连接保存到哪里了？', paragraphs:['点击“保存并返回我的模型”后，连接会出现在“我的模型”的列表中。每张卡片显示连接名称、服务商、各能力型号、凭据和测试状态，以及它实际负责的任务。','连接记录保存在本机配置中，Key 由本机凭据服务保存。连接不是新增到 WorkBuddy 的模型菜单，也不会更换 WorkBuddy 自己的对话模型。'], action:'打开我的模型', view:'models'},
+    workflow: {title:'保存、测试和启用有什么区别？', paragraphs:['保存：记录你填写的连接信息，返回“我的模型”。不会自动调用服务或产生测试费用。','测试：由你点击“测试文字 / 视觉 / 语音”，向对应服务发送小型合成请求，可能产生费用。通过表示接口可用，不代表真实任务质量。获取模型列表与生成测试也是两件事。','启用：进入“配置模型用途”，选择需要使用的连接，再点击“保存并应用”。文字、视觉和语音分别选择；保存连接后不会自动启用。'], action:'打开模型用途', view:'model-routing'},
+    'base-url': {title:'服务地址应该填什么？', paragraphs:['填写服务商提供的 API 基础地址（Base URL），不要填控制台、登录页、聊天网站或完整的 /chat/completions 请求地址。应用会自行补全所需请求路径。','选择服务商预设会填写建议地址。千问还需明确选择“按量 API”或“Token Plan”；若你有账户专属地址，可以选择“保留 / 手动填写地址”并手填。地址与 Key 必须属于同一平台、地域和计费入口。','修改已有连接的服务商或地址时，按页面提示重新填写目标服务的 Key。应用不会把旧 Key 自动发送到另一个地址。']},
+    qwen: {title:'千问AI平台与旧百炼、Token Plan 怎么选？', paragraphs:['新建千问连接默认使用千问AI平台的按量 API：https://maas.qianwenaiapi.com/compatible-mode/v1。Token Plan 使用 https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1，需要对应订阅的专属 Key。个人版与团队版共用套餐地址。','新千问 Token Plan 与旧百炼 Coding Plan 不是同一入口。请以千问AI平台账户显示的订阅、Key 和可用型号为准，不要混用旧地址或仅凭 Key 前缀推断入口。','已有百炼连接保留原地址，避免把现有 Key 静默发往新域名。需要迁移时，在编辑页明确选择千问入口，并填写新平台对应的 Key。','本版支持的原生语音协议可使用千问按量接口与 qwen3-asr-flash 类型号。Token Plan 语音采用新协议，本版尚未适配；这不表示套餐没有语音能力。文字与视觉按账户支持的型号配置。'], links:[['千问 API Key 官方说明','https://platform.qianwenai.com/docs/api-reference/preparation/api-key'],['Token Plan 官方说明','https://platform.qianwenai.com/docs/token-plan/overview']]},
+    'model-id': {title:'获取不到模型列表怎么办？', paragraphs:['模型 ID 是服务商 API 使用的精确型号，不是你给连接取的名称。可以从对应平台文档或控制台复制，再手动填写。','部分服务没有 /models 接口，返回 404、405 或 501 不一定表示生成不可用。填写官方支持的型号并保存，然后单独点击对应能力的测试。','文字、视觉和语音可以用不同型号，共享同一连接的地址与 Key；如果这些能力需要不同地址或 Key，请分开添加连接。']},
+    key: {title:'为什么保存后看不到 Key？更换地址怎么办？', paragraphs:['Key 是凭据，保存后不会返回页面。编辑时留空表示保留已有 Key；输入新值会替换，勾选“移除”会删除它。列表用“Key 已保存”或“未配置 Key”显示状态。','修改服务商或域名时必须重新填写目标服务的 Key，或明确移除旧 Key，防止凭据发往错误地址。不能直接沿用旧百炼 Key 到新千问平台。','未保存的 Key 只保留在当前页面输入框内存中，不进入网址、历史记录或浏览器存储。刷新、关闭页面会丢失草稿；请勿把 Key 发到聊天中。']},
+    capabilities: {title:'文字、视觉、语音怎样配合？', paragraphs:['文字模型：把原文、转写或检索资料整理成笔记、问答与关联。视觉模型：理解选中的视频画面，并结合前后讲解解释结构、层级和箭头。语音模型：在没有可用字幕时把音频转成文字。','先在连接编辑页勾选实际支持的能力并填写型号，再到“模型用途”分别选择。视觉与语音不会自动跟随默认文字连接。相同地址和 Key 可共用一个连接；接口不同则分开添加。','测试与真实任务会把必要文字、选定图片或音频发送给对应服务商。图文笔记需要视觉能力，纯文字视频笔记可优先使用字幕。'], action:'打开模型用途',view:'model-routing'},
+    host: {title:'宿主模式包含视觉和语音吗？', paragraphs:['宿主模式让 WorkBuddy 等客户端完成文字生成。本页准备资料与生成提示，不会替换宿主自己的对话模型。','视觉理解与语音识别由本项目单独调用，需要在“模型用途”中配置。选择宿主文字模式并不代表宿主会自动承担这两项能力。']},
+    gateway: {title:'出现 401、403 或网关错误怎么处理？', paragraphs:['401 / 403：核对平台、计费入口、Key 权限和型号是否配套。不要把真实 Key 放进问题描述。','502：网关收到异常上游响应；503：服务暂时不可用；504：网关等待上游超时。这些状态只能描述响应，不能单独证明网络、模型或订阅的具体故障原因。','记录 Base URL、模型 ID、错误码和发生步骤（获取列表、测试或生成），再排查服务状态和账户权限。应用不会自动切换计费入口、使用另一把 Key 或替你重试付费请求。']}
+  };
+  function parseRoute(search) {
+    const query = new URLSearchParams(search);
+    const view = Object.hasOwn(viewNames, query.get('view')) ? query.get('view') : 'home';
+    const route = {view};
+    if (['model-edit','model-routing'].includes(view)) {
+      const id = query.get('profile') || '';
+      if (/^[a-zA-Z0-9_-]{1,64}$/.test(id)) route.profile = id;
+      else if (view === 'model-edit') return {view:'models'};
+    }
+    if (view === 'help' && Object.hasOwn(helpTopics, query.get('topic'))) route.topic = query.get('topic');
+    return route;
+  }
+  function routeURL(route) {
+    const query = new URLSearchParams();
+    query.set('view', route.view);
+    if (route.profile) query.set('profile', route.profile);
+    if (route.topic) query.set('topic', route.topic);
+    const clean = parseRoute(query.toString());
+    const safe = new URLSearchParams(clean);
+    return '?'+safe.toString();
+  }
+  function handleProfileFormChange(event, actions) {
+    // A select emits input before change. Its dedicated change handler must read
+    // the chosen billing entry before a generic refresh can infer it from the URL.
+    if (['test-capability','provider-option'].includes(event.target.id)) return;
+    actions.markDirty(); actions.updateCapabilities(); actions.updateThinking();
+  }
+  function acceptConfigSnapshot(current, value) {
+    const incoming=value.config||value;
+    // public_config exposes revision (config_revision belongs to task snapshots).
+    // A GET started before a write may finish after it; never roll the UI back.
+    if(current&&Number.isFinite(current.revision)&&
+       (!Number.isFinite(incoming.revision)||incoming.revision<current.revision))return current;
+    return incoming;
+  }
+  async function withDisabledControls(controls, action) {
+    const previous=Array.from(controls,element=>[element,element.disabled]);
+    previous.forEach(([element])=>{element.disabled=true;});
+    try { return await action(); }
+    finally { previous.forEach(([element,disabled])=>{element.disabled=disabled;}); }
+  }
+  // The same route and event boundaries are exercised by dependency-free Node tests.
+  if (typeof document === 'undefined') { module.exports = {parseRoute, routeURL, handleProfileFormChange, withDisabledControls, acceptConfigSnapshot}; return; }
   const byId = id => document.getElementById(id);
   const node = (tag, text = '', className = '') => {
     const element = document.createElement(tag);
@@ -14,7 +69,7 @@
   let token = location.hash.slice(1);
   if (token) {
     storage.set('sessionStorage', 'personal-kb-ui', token);
-    history.replaceState(null, '', location.pathname);
+    history.replaceState(null, '', location.pathname + location.search);
   } else token = storage.get('sessionStorage', 'personal-kb-ui') || '';
   let stopped = false;
   let refreshing = false;
@@ -26,13 +81,20 @@
   let finalText = '';
   let routingDirty = false;
   let profileDirty = false;
+  let profileSaving = false;
   let configRefreshAt = 0;
+  let currentRoute = parseRoute(location.search);
+  let editorIdentity = '';
+  let helpReturn = null;
+  let highlightedProfile = '';
+  let profilesSignature = '';
+  let routeIndex = Number.isSafeInteger(history.state && history.state.kbRouteIndex) ? history.state.kbRouteIndex : 0;
   const testingJobs = new Set();
   const terminal = new Set(['succeeded', 'completed', 'failed', 'interrupted', 'cancelled', 'stale']);
   const jobNames = { prepare_semantic:'准备语义检索', prepare_video:'准备视频组件', index_vault:'建立或同步索引', index:'建立检索索引', query:'知识库问答', qa:'知识库问答', correlation:'关联分析', video_prepare:'视频转写', ingest:'整理笔记', generate_note:'整理笔记', model_test:'测试模型连接' };
   const statusNames = { queued:'排队中', pending:'排队中', running:'进行中', completed:'已完成', succeeded:'已完成', failed:'失败，可重试', interrupted:'已中断，可恢复', cancelled:'已停止', stale:'来源已变化' };
   const providerSymbols = { qwen:'Q', kimi:'K', glm:'G', deepseek:'D', ollama:'◉', custom:'⌘' };
-  const providerShortNames = { qwen:'Qwen · 百炼 API', kimi:'Kimi', glm:'智谱 GLM', deepseek:'DeepSeek', ollama:'本地 Ollama', custom:'自定义服务' };
+  const providerShortNames = { qwen:'千问AI平台', kimi:'Kimi', glm:'智谱 GLM', deepseek:'DeepSeek', ollama:'本地 Ollama', custom:'自定义服务' };
   const capabilityNames = {text:'文字',vision:'视觉',asr:'语音'};
   const capabilitiesOf = profile => Array.isArray(profile.capabilities) ? profile.capabilities : ['text'];
   const modelFor = (profile, capability) => capability === 'text' ? profile.model_id || '' : (profile.capability_models || {})[capability] || '';
@@ -74,16 +136,97 @@
       }
     }
   }
-  function showPage(page) {
-    document.querySelectorAll('.page').forEach(element => { element.hidden = element.id !== 'page-' + page; });
-    document.querySelectorAll('[data-page]').forEach(button => {
-      const active = button.dataset.page === page;
-      button.classList.toggle('active', active);
-      if (active) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current');
+  function editorKey(route) { return route.view === 'model-edit' ? 'edit:' + route.profile : route.view === 'model-new' ? 'new' : ''; }
+  function focusRoute(route, targetId) {
+    requestAnimationFrame(() => {
+      const page = byId('page-' + (editorKey(route) ? 'model-editor' : route.view));
+      const target = targetId && byId(targetId) || (page && page.querySelector('h1,h2'));
+      if (target && !target.closest('[hidden]')) {
+        if(target.matches('h1,h2,.profile'))target.setAttribute('tabindex','-1');
+        target.focus({preventScroll:true});
+        if(targetId)target.scrollIntoView({block:'center',behavior:'instant'});
+      }
     });
-    if (page === 'settings' && !config) loadModels().catch(error => message(errorText(error), true));
-    window.scrollTo({top:0, behavior:'instant'});
   }
+  function renderHelp() {
+    const topic = currentRoute.topic;
+    const sidebar = byId('help-topics'); sidebar.replaceChildren();
+    const overview = node('a','帮助目录'); overview.href='?view=help'; overview.dataset.help='';
+    if (!topic) overview.setAttribute('aria-current','page'); sidebar.append(overview);
+    Object.entries(helpTopics).forEach(([id, item]) => {
+      const link=node('a',item.title); link.href=routeURL({view:'help',topic:id}); link.dataset.help=id;
+      if(topic===id)link.setAttribute('aria-current','page'); sidebar.append(link);
+    });
+    const content=byId('help-content'); content.replaceChildren();
+    if (topic) {
+      const item=helpTopics[topic]; content.append(node('h2',item.title));
+      item.paragraphs.forEach(text=>content.append(node('p',text)));
+      (item.links||[]).forEach(([label,url])=>{const link=node('a',label,'help-source');link.href=url;link.target='_blank';link.rel='noopener noreferrer';content.append(link);});
+      if(item.view){const button=node('button',item.action);button.type='button';button.addEventListener('click',()=>navigate({view:item.view}));content.append(button);}
+    } else {
+      content.append(node('h2','从哪里开始？'),node('p','先添加连接，再按需要测试和分配用途。点击一个问题，只查看对应说明；输入框旁也有直达帮助。'));
+      Object.entries(helpTopics).forEach(([id,item])=>{const link=node('a',item.title,'help-directory-link');link.href=routeURL({view:'help',topic:id});link.dataset.help=id;content.append(link);});
+    }
+    byId('help-return').textContent=helpReturn?'返回'+(editorKey(helpReturn.route)?'刚才的输入框':viewNames[helpReturn.route.view]):'返回我的模型';
+  }
+  function renderRoute({focus=true, targetId} = {}) {
+    if (config && currentRoute.profile && !profileById(currentRoute.profile)) {
+      currentRoute={view:'models'};history.replaceState({kbRouteIndex:routeIndex},'',routeURL(currentRoute));
+      message('这个连接已不存在，请从“我的模型”重新选择。');
+    }
+    const key=editorKey(currentRoute);
+    byId('profile-editor').hidden=!config;
+    byId('editor-loading').hidden=!!config;
+    if (config && key && key!==editorIdentity) {
+      if(currentRoute.view==='model-new')newProfile(); else populateProfile(currentRoute.profile);
+      editorIdentity=key;
+    }
+    const page=key?'model-editor':currentRoute.view;
+    document.querySelectorAll('.page').forEach(element=>{element.hidden=element.id!=='page-'+page;});
+    document.querySelectorAll('.main-nav [data-page]').forEach(button=>{
+      const active=button.dataset.page===(page.startsWith('model')?'models':page);
+      button.classList.toggle('active',active);
+      if(active)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');
+    });
+    if(currentRoute.view==='help')renderHelp();
+    if(currentRoute.view==='model-routing') {
+      const profile=profileById(currentRoute.profile);byId('routing-context').hidden=!profile;
+      byId('routing-context').textContent=profile?'正在查看“'+profile.name+'”的用途。下面保留当前选择，请手动分配后保存；进入此页不会自动启用。':'';
+    }
+    byId('model-draft-notice').hidden=!profileDirty;
+    document.title=(currentRoute.view==='help'&&currentRoute.topic?helpTopics[currentRoute.topic].title:viewNames[currentRoute.view])+' · Personal KB';
+    if(focus){window.scrollTo({top:0,behavior:'instant'});focusRoute(currentRoute,targetId);}
+  }
+  function canNavigate(route) {
+    if(profileSaving){message('正在保存连接，请等待保存结果后再切换页面。');return false;}
+    const key=editorKey(route);
+    return !key || !editorIdentity || key===editorIdentity || !profileDirty || confirm('切换到另一份连接会丢弃当前未保存的草稿（包括输入的 Key）。仍要继续吗？');
+  }
+  function navigate(route, {replace=false, targetId} = {}) {
+    route=parseRoute(routeURL(route));
+    if(!canNavigate(route))return false;
+    if (editorKey(route) && editorKey(route)!==editorIdentity) profileDirty=false;
+    const same=routeURL(route)===routeURL(currentRoute);
+    currentRoute=route;
+    if(!same&&!replace)routeIndex+=1;
+    history[same||replace?'replaceState':'pushState']({kbRouteIndex:routeIndex},'',routeURL(route));
+    renderRoute({targetId});return true;
+  }
+  function showPage(page) { navigate({view:page==='settings'?'models':page}); }
+  window.addEventListener('popstate',event=>{
+    const route=parseRoute(location.search);
+    const targetIndex=Number.isSafeInteger(event.state&&event.state.kbRouteIndex)?event.state.kbRouteIndex:0;
+    if(!canNavigate(route)) {
+      if(targetIndex!==routeIndex)history.go(routeIndex-targetIndex);
+      else history.replaceState({kbRouteIndex:routeIndex},'',routeURL(currentRoute));
+      return;
+    }
+    if(editorKey(route)&&editorKey(route)!==editorIdentity)profileDirty=false;
+    const focusId=currentRoute.view==='help'&&helpReturn&&routeURL(route)===routeURL(helpReturn.route)?helpReturn.focusId:null;
+    routeIndex=targetIndex;currentRoute=route;
+    history.replaceState({kbRouteIndex:routeIndex},'',routeURL(route));renderRoute({targetId:focusId});
+  });
+  window.addEventListener('beforeunload',event=>{if(profileDirty||routingDirty||profileSaving){event.preventDefault();event.returnValue='';}});
   function setTheme(theme) {
     document.documentElement.dataset.theme = theme;
     storage.set('localStorage', 'personal-kb-theme', theme);
@@ -187,7 +330,7 @@
       const profile = profileById(routes[capability]);
       return capabilityNames[capability] + '：' + (profile ? profile.name : '未配置');
     });
-    byId('key-state').textContent = labels.join(' · ') + '。在 AI 设置中统一管理。';
+    byId('key-state').textContent = labels.join(' · ') + '。可在“模型用途”中分别选择。';
   }
   function renderModeSummary() {
     if (!config) return;
@@ -195,6 +338,7 @@
     byId('generation-summary').textContent = config.generation_mode === 'independent'
       ? '独立模型 · ' + (current ? current.name + ' / ' + current.model_id : '按任务指定')
       : '宿主模型 · 由 WorkBuddy 等客户端完成生成';
+    byId('model-list-summary').textContent = byId('generation-summary').textContent;
     byId('task-mode-hint').textContent = config.generation_mode === 'independent'
       ? '当前使用独立模型。任务内容将发送至所选服务，调用可能产生费用。'
       : '当前使用宿主模式。本页准备资料后，可将生成提示交给 WorkBuddy；选择独立模型可在本页完成生成。';
@@ -212,20 +356,27 @@
   function updateRoutingVisibility() {
     const independent = document.querySelector('[name="generation-mode"]:checked');
     byId('routing-fields').hidden = false;
+    const asrProfile=profileById(byId('profile-asr').value);
+    byId('routing-asr-hint').hidden=!(asrProfile&&isTokenPlan(asrProfile.base_url)&&asrProfile.audio_api_style==='dashscope');
     byId('routing-fields-hint').textContent = independent && independent.value === 'independent' ? '以下连接用于新任务；任务指定优先于默认连接。' : '这些连接选择将在切回独立模式后生效。删除被引用的连接前，可在此清空引用并保存。';
   }
   function renderProfiles() {
+    const signature=JSON.stringify([config.profiles,config.generation_mode,config.default_profile,config.task_profiles,config.capability_profiles,highlightedProfile]);
+    if(signature===profilesSignature)return;
+    profilesSignature=signature;
     const holder = byId('profiles'); holder.replaceChildren();
+    byId('profile-count').textContent=String((config.profiles||[]).length);
     if (!(config.profiles || []).length) {
-      holder.append(node('p', '还没有模型连接。选择下方的服务商，添加第一个连接。', 'empty-state')); return;
+      holder.append(node('p', '还没有模型连接。点击“添加模型连接”，保存后会显示在这里。', 'empty-state')); return;
     }
     config.profiles.forEach(profile => {
-      const item = node('div', '', 'profile');
+      const item = node('article', '', 'profile'+(profile.id===highlightedProfile?' recently-saved':''));
+      item.id='model-card-'+profile.id;item.tabIndex=-1;item.setAttribute('aria-label',profile.name);
       const head = node('div', '', 'profile-heading');
       const info = node('div', '', 'profile-info');
       info.append(node('strong', profile.name));
       const capabilities = capabilitiesOf(profile);
-      info.append(node('p', ((providerById(profile.provider) || {}).name || profile.provider) + ' · ' + capabilities.map(capability => capabilityNames[capability] + ' ' + (modelFor(profile, capability) || '未填型号')).join(' / '), 'profile-subtitle'));
+      info.append(node('p', (profile.provider==='qwen'&&isLegacyQwen(profile.base_url)?'百炼（原有连接）':(providerById(profile.provider) || {}).name || profile.provider) + ' · ' + capabilities.map(capability => capabilityNames[capability] + ' ' + (modelFor(profile, capability) || '未填型号')).join(' / '), 'profile-subtitle'));
       const tags = node('div', '', 'profile-tags');
       tags.append(badge('已保存'));
       capabilities.forEach(capability => {
@@ -238,25 +389,19 @@
       });
       const activeRoles = [];
       if (config.generation_mode === 'independent') {
-        if (config.default_profile === profile.id) activeRoles.push('默认');
-        [['ingest','整理'],['qa','问答'],['correlation','关联']].forEach(([key,label]) => { if ((config.task_profiles || {})[key] === profile.id) activeRoles.push(label); });
+        [['ingest','笔记整理'],['qa','知识问答'],['correlation','关联分析']].forEach(([key,label]) => { if (((config.task_profiles || {})[key] || config.default_profile) === profile.id) activeRoles.push(label); });
       }
       ['vision','asr'].forEach(capability => { if ((config.capability_profiles || {})[capability] === profile.id) activeRoles.push(capabilityNames[capability]); });
-      tags.append(badge(activeRoles.length ? '已启用 · ' + activeRoles.join(' / ') : '未启用', activeRoles.length ? 'success' : ''));
+      info.append(node('p','实际用途：'+(activeRoles.length?activeRoles.join(' / '):'尚未分配'),'profile-usage'));
       tags.append(badge(profile.credential_error ? '凭据库暂不可用' : profile.credential_present ? 'Key 已保存' : ['ollama','custom'].includes(profile.provider) && /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(?::|\/|$)/.test(profile.base_url) ? '本机免 Key' : '未配置 Key'));
       info.append(tags);
       const buttons = node('div', '', 'profile-buttons');
       const edit = node('button', '编辑'); edit.type='button'; edit.addEventListener('click', () => editProfile(profile.id));
-      const activate = node('button', '设为默认并启用'); activate.type='button'; activate.addEventListener('click', () => withButton(activate, async () => {
-        applyConfig(await request('/api/models/save', {generation_mode:'independent',default_profile:profile.id}), true);
-        message('已启用 ' + profile.name + '。新任务使用该默认连接；已有的任务覆盖配置继续生效。');
-      }));
-      activate.disabled = !capabilities.includes('text') || !modelFor(profile, 'text');
-      activate.title = '设为默认文字生成连接；视觉和语音需分别选择';
+      const activate = node('button', '配置用途'); activate.type='button'; activate.addEventListener('click',()=>navigate({view:'model-routing',profile:profile.id}));
       const remove = node('button', '删除', 'danger'); remove.type='button'; remove.addEventListener('click', () => withButton(remove, async () => {
         if (!confirm('删除连接“' + profile.name + '”？该连接保存的 Key 也会移除。已被默认或任务配置引用时，请先解除引用。')) return;
-        applyConfig(await request('/api/models/delete', {profile_id:profile.id}), true);
-        if (byId('profile-id').value === profile.id) newProfile();
+        applyConfig(await request('/api/models/delete', {profile_id:profile.id}), false);
+        if (byId('profile-id').value === profile.id) { newProfile(); editorIdentity=''; renderRoute({focus:false}); }
         message('连接已删除。');
       }));
       buttons.append(edit);
@@ -266,7 +411,7 @@
         test.addEventListener('click', () => withButton(test, () => testProfile(profile.id, capability)));
         buttons.append(test);
       });
-      if (capabilities.includes('text')) buttons.append(activate);
+      buttons.append(activate);
       buttons.append(remove); head.append(info, buttons); item.append(head); holder.append(item);
     });
   }
@@ -277,23 +422,29 @@
       button.type='button'; button.setAttribute('aria-pressed', selectedProvider === provider.id ? 'true' : 'false');
       button.append(node('span', providerSymbols[provider.id] || '◇', 'provider-symbol'), node('span', providerShortNames[provider.id] || provider.name));
       button.addEventListener('click', () => {
-        if (byId('profile-id').value) newProfile(provider.id);
-        else { selectProvider(provider.id, true); markProfileDirty(); }
+        if(selectedProvider===provider.id)return;
+        if(!confirm('切换服务商会更新建议地址和文字型号，并清空尚未保存的 Key；连接名称和其他能力仍保留。继续吗？'))return;
+        const name=byId('profile-name').value;
+        byId('model-key').value='';selectProvider(provider.id,true);byId('profile-name').value=name;markProfileDirty();
       });
       holder.append(button);
     });
   }
   function applyConfig(value, forceRouting = false) {
-    config = value.config || value;
+    const incoming=acceptConfigSnapshot(config,value);
+    if(incoming===config)return;
+    config=incoming;
     configRefreshAt = Date.now();
     if (forceRouting) routingDirty = false;
     renderModeSummary(); renderCapabilitySummary(); renderRouting(); renderProfiles(); renderProviders(); renderSecretSources();
     if (!selectedProvider && (config.providers || []).length) selectProvider(config.providers[0].id, true);
     updateProfileButtons();
+    renderRoute({focus:false});
   }
-  async function loadModels(forceRouting = true) {
+  async function loadModels(forceRouting = false) {
+    if(profileSaving)return;
     const value = await request('/api/models');
-    applyConfig(value, forceRouting);
+    if(!profileSaving)applyConfig(value, forceRouting);
   }
   function updateThinking() {
     const provider = providerById(selectedProvider) || {};
@@ -317,15 +468,39 @@
     }
     byId('provider-hint').textContent = provider.hint || '请使用该服务商的模型 API 地址和对应凭据。';
     byId('qwen-plan-hint').hidden = id !== 'qwen';
-    const regions = provider.regions || [];
-    byId('provider-region-field').hidden = !regions.length;
-    byId('provider-region').replaceChildren();
-    regions.forEach(region => { const option=node('option',region.name); option.value=region.base_url; byId('provider-region').append(option); });
-    if (regions.length) {
-      const custom=node('option','自定义地址');custom.value='';byId('provider-region').append(custom);
-      byId('provider-region').value = regions.some(region => region.base_url === byId('model-url').value) ? byId('model-url').value : '';
-    }
+    renderConnectionOptions();
     renderProviders(); updateCapabilities(); updateThinking();
+  }
+  function isLegacyQwen(url) {
+    try {
+      const host=new URL(url).hostname;
+      return ['dashscope.aliyuncs.com','dashscope-intl.aliyuncs.com','dashscope-us.aliyuncs.com'].includes(host)||/^[a-z0-9][a-z0-9-]{0,63}\.(cn-beijing|ap-southeast-1|us-east-1)\.maas\.aliyuncs\.com$/.test(host);
+    } catch (_) { return false; }
+  }
+  function isTokenPlan(url) {
+    try { return new URL(url).hostname==='token-plan.maas.qianwenaiapi.com'; } catch (_) { return false; }
+  }
+  function renderConnectionOptions() {
+    const options=(providerById(selectedProvider)||{}).connection_options||[];
+    const select=byId('provider-option');select.replaceChildren();
+    byId('provider-option-field').hidden=!options.length;
+    options.forEach(item=>{const option=node('option',item.name);option.value=item.id;select.append(option);});
+    const custom=node('option','保留 / 手动填写地址');custom.value='custom';select.append(custom);
+    updateConnectionHint();
+  }
+  function updateConnectionHint() {
+    const options=(providerById(selectedProvider)||{}).connection_options||[];
+    const url=byId('model-url').value.trim().replace(/\/$/,'');
+    const current=options.find(item=>item.base_url===url);
+    byId('provider-option').value=current?current.id:'custom';
+    byId('provider-option-hint').textContent=current?current.hint:selectedProvider==='qwen'?'保留当前手填地址，不会自动替换。旧百炼连接迁移到千问时，请明确选择计费入口并填写对应的新 Key。':'';
+    byId('asr-plan-hint').hidden=!(byId('capability-asr').checked&&isTokenPlan(url)&&byId('audio-api-style').value==='dashscope');
+    byId('model-key-format').hidden=selectedProvider!=='qwen';
+    byId('model-key-format').textContent=isTokenPlan(url)?'Token Plan 专属 Key 通常以 sk-sp- 开头，请使用对应订阅的 Key。前缀仅供识别，应用不会仅凭前缀拒绝凭据。':isLegacyQwen(url)?'这是原有百炼地址，请使用对应地域或工作空间的百炼 Key；不要直接混用新千问平台的 Key。':'千问按量 API Key 通常以 sk-ws- 开头，早期 Key 可能以 sk- 开头。请以账户显示的入口为准；前缀不是兼容性的唯一依据。';
+    const saved=profileById(byId('profile-id').value);
+    let changed=false;
+    try { changed=!!saved&&(saved.provider!==selectedProvider||new URL(saved.base_url).origin!==new URL(url).origin); } catch (_) { /* Invalid URL is handled by the form. */ }
+    byId('model-key-label').textContent=changed&&saved.credential_present?'（地址或服务商已变更，请重新填写对应 Key 或移除旧 Key）':saved&&saved.credential_present?'（已保存，留空保留）':'（尚未保存）';
   }
   function selectedCapabilities() {
     return Object.keys(capabilityNames).filter(capability => byId('capability-' + capability).checked);
@@ -341,6 +516,7 @@
     select.replaceChildren();
     capabilities.forEach(capability => { const option = node('option', capabilityNames[capability]); option.value = capability; select.append(option); });
     if (capabilities.includes(current)) select.value = current;
+    updateConnectionHint();
     updateProfileButtons();
   }
   function renderSecretSources() {
@@ -352,10 +528,12 @@
   }
   function markProfileDirty() {
     profileDirty = true;
+    byId('model-draft-notice').hidden=false;
     byId('profile-save-state').textContent = '有未保存的修改';
     updateProfileButtons();
   }
   function updateProfileButtons() {
+    if(profileSaving)return;
     const saved = !!byId('profile-id').value;
     const capability = byId('test-capability').value;
     const modelInput = {text:'model-id',vision:'vision-model-id',asr:'asr-model-id'}[capability];
@@ -364,22 +542,38 @@
     byId('test-profile').title = profileDirty ? '请先保存修改' : testDescription(capability);
     byId('test-profile').textContent = '测试已保存' + (capabilityNames[capability] || '') + '能力';
     byId('import-template-key').disabled = !saved || profileDirty;
-    byId('import-legacy-key').disabled = !saved || profileDirty || selectedProvider !== 'qwen' || !(config && config.legacy_secret_present);
-    byId('secret-import-hint').textContent = !saved ? '请先保存并选择一个连接。成功写入系统凭据库并回读校验后，清空来源密钥字段；失败保留原值。' : profileDirty ? '请先保存或取消修改，再导入到当前连接。' : '导入目标：' + ((profileById(byId('profile-id').value) || {}).name || '当前连接') + '。成功写入系统凭据库并回读校验后，清空原文件密钥字段，保留其他内容；失败保留原值。旧 DashScope Key 仅可迁移到 Qwen 连接。';
+    byId('import-legacy-key').disabled = !saved || profileDirty || selectedProvider !== 'qwen' || !isLegacyQwen(byId('model-url').value) || !(config && config.legacy_secret_present);
+    byId('secret-import-hint').textContent = !saved ? '请先保存并选择一个连接。成功写入系统凭据库并回读校验后，清空来源密钥字段；失败保留原值。' : profileDirty ? '请先保存或取消修改，再导入到当前连接。' : '导入目标：' + ((profileById(byId('profile-id').value) || {}).name || '当前连接') + '。成功写入系统凭据库并回读校验后，清空原文件密钥字段，保留其他内容；失败保留原值。旧 DashScope Key 仅可导入使用原百炼官方地址的连接，不能迁移为新千问凭据。';
+  }
+  async function saveProfileExclusively(action) {
+    if(profileSaving)throw new Error('正在保存，请等待当前请求完成。');
+    profileSaving=true;
+    byId('profile-form').setAttribute('aria-busy','true');
+    byId('profile-save-state').textContent='正在保存，请稍候…';
+    try {
+      return await withDisabledControls(document.querySelectorAll('#profile-form input, #profile-form select, #profile-form button, #provider-grid button, #cancel-edit, #page-model-editor [data-page]'),action);
+    } finally {
+      profileSaving=false;byId('profile-form').removeAttribute('aria-busy');
+      byId('profile-save-state').textContent=profileDirty?'有未保存的修改':byId('profile-id').value?'已保存的配置保持不变':'尚未保存连接';
+      updateProfileButtons();
+    }
   }
   function newProfile(providerId) {
     byId('profile-form').reset(); byId('profile-id').value = '';
     byId('model-options').replaceChildren(); byId('clear-key-label').hidden = true;
     byId('model-key-label').textContent = '';
     byId('model-key').placeholder = '输入此服务商的 API Key；本机模型可留空';
-    byId('editor-title').textContent = '添加模型连接'; byId('cancel-edit').hidden = true;
+    byId('editor-context').textContent='我的模型 / 添加连接';
+    byId('editor-title').textContent = '添加模型连接'; byId('cancel-edit').hidden = false;
     byId('profile-save-state').textContent = '';
     profileDirty = false;
     selectProvider(providerId || selectedProvider || (config.providers[0] || {}).id, true);
     updateProfileButtons();
   }
-  function editProfile(id) {
+  function editProfile(id) { navigate({view:'model-edit',profile:id}); }
+  function populateProfile(id) {
     const profile = profileById(id); if (!profile) return;
+    byId('profile-form').reset();byId('model-options').replaceChildren();
     byId('profile-id').value = profile.id;
     byId('profile-name').value = profile.name;
     byId('model-id').value = profile.model_id;
@@ -399,7 +593,7 @@
     profileDirty = false;
     selectProvider(profile.provider, false);
     byId('model-thinking').value = profile.thinking || 'default'; updateThinking(); updateProfileButtons();
-    byId('profile-editor').scrollIntoView({block:'start',behavior:'smooth'});
+    byId('editor-context').textContent='我的模型 / '+profile.name;
   }
   async function testProfile(profileId, capability = 'text') {
     const profile = profileById(profileId);
@@ -417,10 +611,10 @@
     const profileId = byId('profile-id').value;
     const profile = profileById(profileId);
     if (!profile || profileDirty) throw new Error('请先保存并选择目标连接。');
-    if (source === 'legacy' && profile.provider !== 'qwen') throw new Error('旧 DashScope Key 只可导入 Qwen 连接。');
+    if (source === 'legacy' && (profile.provider !== 'qwen' || !isLegacyQwen(profile.base_url))) throw new Error('旧 DashScope Key 只可导入使用原百炼官方地址的连接。');
     if (!confirm('将本机文件中的 Key 导入“' + profile.name + '”' + (profile.credential_present ? '并替换此连接当前保存的 Key' : '') + '？系统凭据库写入并回读校验成功后，会清空原文件的密钥字段并保留其他内容；失败时保留原值。')) return;
     await request('/api/models/import-secret', {profile_id:profileId,source});
-    await loadModels(false); editProfile(profileId);
+    await loadModels(false); populateProfile(profileId);
     message('Key 已导入“' + profile.name + '”。原文件的密钥字段已清空，其他内容保留；请分别测试需要的能力。');
   }
 
@@ -682,7 +876,16 @@
 
   document.querySelectorAll('[data-page]').forEach(button=>button.addEventListener('click',()=>showPage(button.dataset.page)));
   document.querySelector('.brand').addEventListener('click',event=>{event.preventDefault();showPage('home');});
-  ['open-settings','hero-settings','edit-generation','video-settings'].forEach(id=>byId(id).addEventListener('click',()=>showPage('settings')));
+  ['open-settings','hero-settings'].forEach(id=>byId(id).addEventListener('click',()=>showPage('models')));
+  ['edit-generation','video-settings'].forEach(id=>byId(id).addEventListener('click',()=>showPage('model-routing')));
+  document.addEventListener('click',event=>{
+    const link=event.target.closest('a[data-help]');if(!link||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;
+    event.preventDefault();
+    if(currentRoute.view!=='help')helpReturn={route:{...currentRoute},focusId:link.dataset.returnFocus||''};
+    navigate({view:'help',topic:link.dataset.help||undefined});
+  });
+  byId('help-return').addEventListener('click',()=>navigate(helpReturn?helpReturn.route:{view:'models'},{targetId:helpReturn&&helpReturn.focusId}));
+  byId('resume-profile').addEventListener('click',()=>navigate(editorIdentity==='new'?{view:'model-new'}:{view:'model-edit',profile:byId('profile-id').value}));
   byId('start-task').addEventListener('click',()=>showPage('tasks'));
   byId('theme-toggle').addEventListener('click',()=>setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark'));
   byId('register').addEventListener('click',()=>action('/api/register',{},byId('register')));
@@ -702,14 +905,22 @@
       message('生成配置已保存并应用，只影响之后开始的新任务。');
     });
   });
-  byId('new-profile').addEventListener('click',()=>{if(!config)return;newProfile();byId('profile-editor').scrollIntoView({block:'start',behavior:'smooth'});byId('profile-name').focus({preventScroll:true});});
-  byId('cancel-edit').addEventListener('click',()=>newProfile());
-  byId('profile-form').addEventListener('input',event=>{if(event.target.id==='test-capability')return;markProfileDirty();updateCapabilities();updateThinking();});
-  byId('profile-form').addEventListener('change',event=>{if(event.target.id==='test-capability')return;markProfileDirty();updateCapabilities();updateThinking();});
-  byId('provider-region').addEventListener('change',()=>{if(byId('provider-region').value)byId('model-url').value=byId('provider-region').value;});
-  byId('model-url').addEventListener('input',()=>{const provider=providerById(selectedProvider)||{};byId('provider-region').value=(provider.regions||[]).some(region=>region.base_url===byId('model-url').value)?byId('model-url').value:'';});
+  byId('new-profile').addEventListener('click',()=>{if(config)navigate({view:'model-new'},{targetId:'profile-name'});});
+  byId('cancel-edit').addEventListener('click',()=>{if(profileSaving)return;if(profileDirty&&!confirm('取消会丢弃未保存的修改和输入的 Key。继续吗？'))return;profileDirty=false;editorIdentity='';byId('profile-form').reset();navigate({view:'models'});});
+  const profileFormActions={markDirty:markProfileDirty,updateCapabilities,updateThinking};
+  ['input','change'].forEach(type=>byId('profile-form').addEventListener(type,event=>handleProfileFormChange(event,profileFormActions)));
+  byId('provider-option').addEventListener('change',()=>{
+    const option=((providerById(selectedProvider)||{}).connection_options||[]).find(item=>item.id===byId('provider-option').value);
+    if(option){
+      if(byId('model-url').value!==option.base_url)byId('model-key').value='';
+      byId('model-url').value=option.base_url;updateConnectionHint();
+    } else byId('provider-option-hint').textContent='保留当前地址，你可以在下方手动填写。应用不会因选择此项而替换地址或 Key。';
+    markProfileDirty();
+  });
+  byId('model-url').addEventListener('input',updateConnectionHint);
   byId('profile-form').addEventListener('submit',event=>{
     event.preventDefault();withButton(byId('save-profile'),async()=>{
+      const result=await saveProfileExclusively(async()=>{
       if (!selectedProvider) throw new Error('请先选择模型服务商。');
       const existingId=byId('profile-id').value;
       const profile={name:byId('profile-name').value.trim(),provider:selectedProvider,base_url:byId('model-url').value.trim(),model_id:byId('model-id').value.trim(),timeout_seconds:Number(byId('model-timeout').value),max_output_tokens:Number(byId('model-max-tokens').value),thinking:byId('model-thinking').value};
@@ -724,10 +935,13 @@
       if (profile.api_key && profile.clear_key) throw new Error('输入新 Key 与移除 Key 不能同时选择。');
       const before=new Set((config.profiles||[]).map(item=>item.id));
       const value=await request('/api/models/save',{profile});
-      byId('model-key').value='';applyConfig(value);
-      const saved=existingId || ((config.profiles||[]).find(item=>!before.has(item.id))||{}).id;
-      if (saved) editProfile(saved);
-      message('模型连接已保存。可以测试连接，再选择是否启用。');
+        return {value,existingId,before};
+      });
+      byId('model-key').value='';profileDirty=false;editorIdentity='';applyConfig(result.value);
+      const saved=result.existingId || ((config.profiles||[]).find(item=>!result.before.has(item.id))||{}).id;
+      highlightedProfile=saved||'';renderProfiles();
+      navigate({view:'models'},{targetId:saved?'model-card-'+saved:undefined});
+      message('已保存到“我的模型”。你可以在下方卡片编辑、按能力测试，再到“配置用途”选择是否启用。');
     });
   });
   byId('test-capability').addEventListener('change',updateProfileButtons);
@@ -783,6 +997,8 @@
   }));
   setTheme(storage.get('localStorage','personal-kb-theme')==='light'?'light':'dark');
   updateTaskForm();
+  history.replaceState({kbRouteIndex:routeIndex},'',routeURL(currentRoute));
+  renderRoute({focus:false});
   if(!token)message('请双击安装入口打开此页面，认证信息会在本机自动传递。',true);
   else {
     loadModels().catch(error=>message(errorText(error),true));

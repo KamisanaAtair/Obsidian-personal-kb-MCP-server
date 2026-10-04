@@ -55,6 +55,78 @@ def test_host_default_has_no_side_effect(service):
     assert len(service.public_config()["providers"]) == 6
 
 
+def test_qwen_catalog_distinguishes_standard_and_token_plan_without_rewriting_profiles(service):
+    qwen = next(value for value in service.public_config()["providers"] if value["id"] == "qwen")
+    assert qwen["name"] == "千问AI平台"
+    assert qwen["default_base_url"] == "https://maas.qianwenaiapi.com/compatible-mode/v1"
+    assert qwen["default_model"] == "qwen3.7-plus"
+    assert {value["id"]: value["base_url"] for value in qwen["connection_options"]} == {
+        "standard": "https://maas.qianwenaiapi.com/compatible-mode/v1",
+        "token_plan": "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1",
+    }
+    assert "regions" not in qwen
+    assert not service.path.exists()
+
+
+@pytest.mark.parametrize(
+    "base_url,key",
+    [
+        ("https://maas.qianwenaiapi.com/compatible-mode/v1", "sk-ws-synthetic-no-real-access"),
+        ("https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1", "sk-sp-synthetic-no-real-access"),
+    ],
+)
+def test_new_qwen_connections_send_synthetic_keys_to_explicit_endpoint(service, base_url, key):
+    # Mocked protocol contract only; no real account or paid provider request.
+    profile = service.save_config({"profile": {
+        "provider": "qwen", "base_url": base_url, "api_key": key,
+    }})["profiles"][-1]
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        assert str(request.url) == base_url + "/chat/completions"
+        assert request.headers["Authorization"] == "Bearer " + key
+        assert json.loads(request.content)["model"] == "qwen3.7-plus"
+        return httpx.Response(200, content=stream(delta("你好", finish_reason="stop")))
+
+    mock(service, handler)
+    assert service.test_connection(profile["id"])["success"] is True
+    assert len(requests) == 1
+    assert key not in service.path.read_text() + json.dumps(service.public_config())
+
+
+def test_existing_bailian_connection_preserved_and_migration_requires_new_key(service):
+    old_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    profile = add(service, "qwen", base_url=old_url, model_id="qwen-plus", api_key="synthetic-old-key")
+    before = service.path.read_bytes()
+    reopened = ModelService(service.data_dir, service.credentials)
+    try:
+        restored = reopened.public_config()["profiles"][0]
+        assert restored["base_url"] == old_url and restored["model_id"] == "qwen-plus"
+        assert reopened.path.read_bytes() == before
+        renamed = reopened.save_config({"profile": {"id": profile["id"], "name": "保留旧连接"}})
+        assert renamed["profiles"][0]["base_url"] == old_url
+        assert renamed["profiles"][0]["model_id"] == "qwen-plus"
+        assert reopened._headers(reopened.profile_snapshot(profile["id"]))["Authorization"] == (
+            "Bearer synthetic-old-key"
+        )
+        new_url = PROVIDERS["qwen"]["default_base_url"]
+        saved = reopened.path.read_bytes()
+        with pytest.raises(ModelError) as exc:
+            reopened.save_config({"profile": {"id": profile["id"], "base_url": new_url}})
+        assert exc.value.code == "credential_endpoint_changed"
+        assert reopened.path.read_bytes() == saved
+        changed = reopened.save_config({"profile": {
+            "id": profile["id"], "base_url": new_url, "api_key": "sk-ws-synthetic-new-key",
+        }})
+        assert changed["profiles"][0]["base_url"] == new_url
+        assert reopened._headers(reopened.profile_snapshot(profile["id"]))["Authorization"] == (
+            "Bearer sk-ws-synthetic-new-key"
+        )
+    finally:
+        reopened.close()
+
+
 def test_secret_never_written_and_snapshot_uses_immutable_credential(service):
     profile = add(service, api_key="synthetic-key-one")
     before = activate(service, profile)
