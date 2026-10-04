@@ -1,7 +1,11 @@
 {
-  "version": "0.4.0b1",
+  "version": "0.4.0b2",
   "python": "3.11.15",
   "uv": "0.12.12",
+  "uv_binaries": {
+    "windows-x64": {"file": "installer/vendor/windows-x64/uv.exe", "bytes": 41455408, "sha256": "efb9599543b26b3ea5adc1649bef69788633d9cc25c6cfd97b799e4dfa0c2cfb"},
+    "macos-arm64": {"file": "installer/vendor/macos-arm64/uv", "bytes": 36498272, "sha256": "53cf843c2eed12d1cafdaab7a1ba95e53496f7df280fc2be4fa8f3d7c32a1496"}
+  },
   "uv_archives": {
     "windows-x64": {"file": "uv-x86_64-pc-windows-msvc.zip", "sha256": "3d54912924c36e862c14f427d04f2ed70a99e8001d1c30caa101f6d5711626d5"},
     "macos-arm64": {"file": "uv-aarch64-apple-darwin.tar.gz", "sha256": "46740540b63fdee9a6cb2e19baf3f1f475b850c440a33e63455087a6871263f1"},

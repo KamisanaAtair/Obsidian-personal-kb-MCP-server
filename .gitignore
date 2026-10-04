@@ -44,7 +44,12 @@ local-validation/
 # MCP server prepare 结果恢复日志（本地调试/超时恢复用）
 logs/
 
-# Local-only installer inputs and project investigation memory
-/installer/vendor/
+# Windows source checkouts must include their launcher runtime.
+/installer/vendor/*
+!/installer/vendor/windows-x64/
+/installer/vendor/windows-x64/*
+!/installer/vendor/windows-x64/uv.exe
+
+# Private project investigation memory (public reports are added explicitly).
 /project-memory/
 .DS_Store

@@ -1,14 +1,14 @@
-# Personal KB 0.4.0b1 试用指南
+# Personal KB 0.4.0b2 试用指南
 
 这一版可以继续使用 WorkBuddy 的模型，也能在本地页面选择自己的生成模型。界面默认黑紫，可用右上角按钮切换白紫。当前验收进展与限制见 [开发日志](https://github.com/KamisanaAtair/Obsidian-personal-kb-MCP-server/blob/codex/local-installer-preview/project-memory/reports/2026-10-03-model-settings-development.md)。
 
 ## 安装并打开
 
-1. 从 [README 下载入口](README.md#首次使用) 取得 0.4.0b1 平台包。Windows 需要 x64，Mac 需要 Apple 芯片及 macOS 14 或以上；不支持 Intel Mac。
-2. 完整解压 ZIP，双击 `install.cmd`（Windows）或 `install.command`（Mac）。首次会联网准备私有 Python 和依赖，无需预装 Python、Git 或手动输入命令。
+1. 从 [README 下载入口](README.md#首次使用) 取得 0.4.0b2 平台包。Windows 需要 x64，Mac 需要 Apple 芯片及 macOS 14 或以上；不支持 Intel Mac。
+2. 完整解压平台 ZIP；Windows 也可完整克隆本分支或解压源码 ZIP。双击 `install.cmd`（Windows）或 `install.command`（Mac）。首次会联网准备私有 Python 和依赖，无需预装 Python、Git 或手动输入命令。
 3. 自动打开“Personal KB · 你的本机知识库”。工作台显示连接与组件状态；安装阶段不会选择或扫描笔记库。
 
-旧 0.3 安装包仍保留，但没有新的模型设置页面。重新打开时可检查页脚版本；若仍显示旧版，请先停止旧服务，再使用 0.4.0b1 入口启动。
+旧 0.3 安装包仍保留，但没有新的模型设置页面。重新打开时可检查页脚版本；若仍显示旧版，请先停止旧服务，再使用 0.4.0b2 入口启动。
 
 ## 选择自己的模型
 
@@ -69,3 +69,7 @@
 - 停止服务：展开页面“维护与退出”，点击停止。
 
 本版为未签名、需联网的候选试用包。当前真实 Ollama 模型调用已有证据；完整业务、Computer Use / WorkBuddy 黑盒、Windows 实机及四家云端真实账户仍有待验项，不能以协议测试或历史握手代替。请查看 [README 验证范围](README.md#验证范围与试用边界) 和 [持续更新的工作日志](https://github.com/KamisanaAtair/Obsidian-personal-kb-MCP-server/blob/codex/local-installer-preview/project-memory/reports/2026-10-03-model-settings-development.md)。
+
+## Windows 启动文件缺失
+
+0.4.0b2 的 Windows 平台包和本分支源码均带有 `installer/vendor/windows-x64/uv.exe`。如果启动器显示 `Missing required file`，窗口会列出缺少文件的完整路径；请核对运行目录及该文件是否实际存在。不要单独复制 `install.cmd`。如果文件解压后消失，可检查安全软件隔离记录。按键只会关闭本次失败窗口，不会恢复安装。

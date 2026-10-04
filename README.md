@@ -1,15 +1,15 @@
 # Personal KB — 自选模型的本机知识库
 
-把 Obsidian 笔记接入 WorkBuddy，也可以直接在本地页面整理内容。**0.4.0b1** 增加独立模型配置、黑紫 / 白紫界面和本地任务页：你可以继续使用宿主模型，或让知识库直接调用自己的 Qwen、Kimi、GLM、DeepSeek、本地 Ollama 或自定义兼容服务。
+把 Obsidian 笔记接入 WorkBuddy，也可以直接在本地页面整理内容。**0.4.0b2** 修复 Windows 源码克隆后缺少启动组件的问题，并保留独立模型配置、黑紫 / 白紫界面和本地任务页：你可以继续使用宿主模型，或让知识库直接调用自己的 Qwen、Kimi、GLM、DeepSeek、本地 Ollama 或自定义兼容服务。
 
 当前为候选试用版；已实现功能不等于全部通过实机验收。进度、测试证据和未完成项见 [本轮开发与测试日志](https://github.com/KamisanaAtair/Obsidian-personal-kb-MCP-server/blob/codex/local-installer-preview/project-memory/reports/2026-10-03-model-settings-development.md)。
 
 ## 首次使用
 
-下载适合你电脑的 **0.4.0b1 候选安装包**：
+下载适合你电脑的 **0.4.0b2 候选安装包**：
 
-- [Windows x64](preview-releases/0.4.0b1/PersonalKB-0.4.0b1-windows-x64.zip?raw=true) · [SHA256](preview-releases/0.4.0b1/PersonalKB-0.4.0b1-windows-x64.zip.sha256)
-- [macOS 14+ Apple 芯片](preview-releases/0.4.0b1/PersonalKB-0.4.0b1-macos-arm64.zip?raw=true) · [SHA256](preview-releases/0.4.0b1/PersonalKB-0.4.0b1-macos-arm64.zip.sha256)
+- [Windows x64](preview-releases/0.4.0b2/PersonalKB-0.4.0b2-windows-x64.zip?raw=true) · [SHA256](preview-releases/0.4.0b2/PersonalKB-0.4.0b2-windows-x64.zip.sha256)
+- [macOS 14+ Apple 芯片](preview-releases/0.4.0b2/PersonalKB-0.4.0b2-macos-arm64.zip?raw=true) · [SHA256](preview-releases/0.4.0b2/PersonalKB-0.4.0b2-macos-arm64.zip.sha256)
 
 1. **完整解压 ZIP**。Windows 选择“全部解压”；Mac 在 Finder 双击 ZIP，然后进入解压后的文件夹。
 2. **双击启动**：Windows 打开 `install.cmd`，Mac 打开 `install.command`。启动器准备私有 Python 和基础依赖，并打开本机网页，无需预装 Python 或 Git。
@@ -20,7 +20,7 @@
 
 **[从用户视角开始试用](README-FIRST.md)** · [安装与恢复](docs/SETUP_FROM_ZIP.md) · [WorkBuddy 接入](docs/workbuddy.md) · [十个 HTTP MCP 工具](docs/HOST_USAGE.md)
 
-安装包放在仓库中，不代表已创建 GitHub Release。GitHub 的“Code → Download ZIP”下载的是源码，不含启动所需的 uv 二进制。[0.3.0b1 历史包](preview-releases/0.3.0b1/) 保留原文件和 SHA256，不包含本次模型设置功能。
+安装包放在仓库中，不代表已创建 GitHub Release。从 **0.4.0b2** 起，本分支的 Git 克隆和“Code → Download ZIP”源码 ZIP 均包含 Windows 所需的 `uv.exe`；完整取得目录后可直接运行根目录 `install.cmd`。Mac 用户仍使用上面的平台安装 ZIP，源码目录不附带 Mac 二进制。[0.3.0b1 历史包](preview-releases/0.3.0b1/) 保留原文件和 SHA256，不包含本次模型设置功能。
 
 ## 模型由你选择
 
@@ -63,13 +63,15 @@
 | 范围 | 当前证据 | 待验收 |
 |---|---|---|
 | 历史 0.3 基础能力 | 已有 93 项测试及 7 个子测试的基线；Mac 基础安装、检索模型本地加载、视频组件准备有历史证据 | 不据此宣称 0.4 新安装包或模型设置已验收 |
-| 0.4 自动化 | 当前 176 项测试和 7 个子测试通过，覆盖模型协议、安全、故障恢复及业务集成 | 最终版本的完整回归及包内容核验 |
+| 0.4 自动化 | 0.4.0b1 基线已有 176 项测试和 7 个子测试通过，覆盖模型协议、安全、故障恢复及业务集成 | 0.4.0b2 的新验证结果见下方 Windows 修复日志 |
 | 真实独立模型 | Ollama Qwen3 4B 与 bge-m3 的真实整理、索引、问答和关联通过 16 项语义及保存检查 | 真实页面与 WorkBuddy 操作；更多模型的答案质量与性能 |
 | 四家云端服务 | 按协议进行自动化测试；当前没有对应账户 Key | 真实账户认证、模型权限、计费和端到端行为 |
 | 页面及 WorkBuddy | 已实现本地管理页、接入配置与 HTTP MCP | Computer Use 页面黑盒、WorkBuddy 原生信任和真实业务；当前 Mac 锁定，尚未完成 |
-| Windows 与其他功能 | 保留 Windows 启动器及历史安装流程 | Windows 实机、真实云端 ASR、大型库性能 |
+| Windows 安装启动 | 0.4.0b2 新增干净克隆、源码 ZIP、平台 ZIP 的 Windows 自动化门禁；执行结果见修复日志 | Windows 桌面双击、浏览器视觉、WorkBuddy 原生操作；真实云端 ASR、大型库性能 |
 
 “配置已保存”“收到客户端握手”“业务完成”是三个独立结果。测试客户端握手不能证明 WorkBuddy 已完成原生信任；模型准备成功不能证明用户库已经建立索引。测试范围更新后以 [开发日志](https://github.com/KamisanaAtair/Obsidian-personal-kb-MCP-server/blob/codex/local-installer-preview/project-memory/reports/2026-10-03-model-settings-development.md) 的实际证据为准。
+
+本次 Windows 修复的提交、安装包校验和实际 CI 结果见 [Windows 启动修复日志](https://github.com/KamisanaAtair/Obsidian-personal-kb-MCP-server/blob/codex/local-installer-preview/project-memory/reports/2026-10-04-windows-installer-fix.md)。
 
 ## 开发与打包
 
@@ -82,7 +84,7 @@ uv run --no-sync python scripts/build_installer.py
 
 纯基础服务可用 `pip install -e .` 后运行 `personal-kb --data-dir /absolute/path/to/test-data --no-browser`，不会自动写 WorkBuddy 配置。生成服务位于 `local_app/models/`，`ModelFactory` 选择厂商适配器，公共服务管理配置、凭据引用、连接池与响应解析；见 [当前开发上下文](PROJECT_CONTEXT.md)。
 
-打包前按 `installer/release.json` 下载并校验官方 uv 0.12.12 归档，将可执行文件放入 `installer/vendor/<platform>/`。安装器使用带 SHA256 的依赖锁，语义模型使用固定 revision 与文件清单。`dist/` 是构建输出；预览交付包按版本另存，不覆盖 0.3 历史包。旧四工具 stdio 实现保留，见 [旧版说明](docs/LEGACY_STDIO.md)，不等同于本版 HTTP MCP。
+Windows uv 0.12.12 已按官方归档校验并精确纳入 Git；Mac 打包前仍需按 `installer/release.json` 下载并校验官方归档，将可执行文件放入 `installer/vendor/macos-arm64/`。打包会检查所选平台二进制的大小和 SHA256、必要文件及版本一致性；缺失或不匹配时立即失败。仅构建 Windows 可运行 `python scripts/build_installer.py --platform windows-x64`。安装器使用带 SHA256 的依赖锁，语义模型使用固定 revision 与文件清单。`dist/` 是构建输出；预览交付包按版本另存，不覆盖 0.3 历史包。旧四工具 stdio 实现保留，见 [旧版说明](docs/LEGACY_STDIO.md)，不等同于本版 HTTP MCP。
 
 ## 上游与许可证
 

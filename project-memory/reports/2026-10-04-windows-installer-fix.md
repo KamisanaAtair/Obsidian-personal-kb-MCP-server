@@ -1,0 +1,56 @@
+# Windows 启动入口修复与验证
+
+日期：2026-10-04（Asia/Shanghai）。目标分支：`codex/local-installer-preview`。
+
+## 问题与已确认的证据
+
+用户从源码克隆后运行 `install.cmd`，反复收到 `Installation archive is incomplete`。原提交 `b82099ec950154d0d596c9c49db9d24ad9f40f78` 的脚本必须找到 `installer/vendor/windows-x64/uv.exe`，但 `.gitignore` 排除了整个 vendor，Git 树中没有这个文件。因此该提交的源码克隆和源码 ZIP 无法从此入口启动。
+
+重新下载同提交的实际 Windows 平台 ZIP，SHA256 为 `4860a52634747e693d1eba24672853aab03ac1dc94cc10b31c51da5cf3302d2e`，CRC 检查通过，且包含正确的 uv.exe。因此没有证据证明旧平台 ZIP 本身漏文件；用户机器实际运行目录没有远程观察。此前只让用户重新解压未解决源码入口缺陷。
+
+另一个发布缺陷是打包脚本只枚举现有文件：缺少 vendor 时仍可产出 ZIP，缺少必要输入的失败门禁。
+
+## 修复范围
+
+- 版本升级为 `0.4.0b2`，旧版安装包保持原样。
+- 精确将 Windows `uv.exe` 纳入 Git，使 Windows 克隆与源码 ZIP 的根目录 `install.cmd` 具有所需启动组件。其他平台 vendor 仍作为本地打包输入。
+- 新提示列出缺失文件的完整路径，并说明按键只结束失败窗口；分别检查 uv.exe 与 bootstrap.py。
+- 构建前检查所有所选平台的必要文件、版本一致性、二进制大小和 SHA256，拒绝链接。所有平台预检完成后才构建，临时产物通过检查后再发布到输出目录。
+- 新增 Windows GitHub Actions：干净克隆、源码 archive、实际候选平台 ZIP 三条路径；真实执行 cmd、内置 uv、私有 Python、基础依赖安装与服务启动。认证页面、MCP 和持久启动入口另外检查。
+- 所有 CI 安装使用合成临时目录，不注册 WorkBuddy、不调用云模型、不处理用户笔记、不输出凭据。
+
+## 第三方二进制来源
+
+均在本次重新下载官方 uv `0.12.12` 归档，核对 `installer/release.json` 中已有的归档 SHA256，并逐字节对比本地可执行文件。
+
+| 平台 | 可执行文件字节数 | 可执行文件 SHA256 |
+| --- | ---: | --- |
+| Windows x64 | 41455408 | `efb9599543b26b3ea5adc1649bef69788633d9cc25c6cfd97b799e4dfa0c2cfb` |
+| macOS ARM64 | 36498272 | `53cf843c2eed12d1cafdaab7a1ba95e53496f7df280fc2be4fa8f3d7c32a1496` |
+
+来源与 MIT / Apache 许可证保留在 `installer/third_party/`。可执行文件哈希不代表 Windows 业务验收，实际执行结果另记。
+
+## 审议及交付阶段
+
+独立中书方案已由门下 `APPROVE_PLAN`。审议明确允许：先完成本地验证和独立限定结果审议，普通推送待验证候选，以触发 Windows CI；在 Windows 实际通过之前不得宣称 Windows 安装已验证。
+
+当前记录为候选准备阶段，Windows CI 尚未运行。后续实际命令结果、提交与 run URL 将在本文件补记。
+
+## 验证边界
+
+Windows 执行器上的真实安装、服务及协议测试不能替代用户 Windows 桌面双击、浏览器视觉或 WorkBuddy 原生信任和业务验收。此前整体开发任务的 Computer Use / WorkBuddy 待验项继续保留，不因本次修复而消失。云模型真实账户及 Windows 可选语义/视频组件也不属于本次基础启动检查。
+
+## 候选推送前本地验证
+
+- 完整回归：`python -m pytest tests tests_local -q`，190 项测试、7 个子测试通过（19.92 秒）。
+- 新增 14 项打包检查，包含缺失、同大小篡改、错误清单、版本冲突、链接、跨平台预检及失败保留已有产物。
+- 前后对照：在同一合成临时源码树中删去 uv，原 b82099e 构建器仍生成 ZIP；新构建器拒绝且不创建输出目录。
+- 新增及修改的 Python 文件通过限定 Ruff 和语法检查。Windows 驱动尚未在本机执行，本机为 macOS。
+- 已从完整受控输入生成两份新候选 ZIP；构建阶段校验 uv SHA256 和 ZIP CRC。
+
+| 包 | 字节数 | SHA256 |
+| --- | ---: | --- |
+| `PersonalKB-0.4.0b2-windows-x64.zip` | 17571340 | `8171a17918643023983b62b9bea39ce19cdaef0d99199279d3cf7944addb33e0` |
+| `PersonalKB-0.4.0b2-macos-arm64.zip` | 16846127 | `e92e70e889b68dfa01bb674ee5f95e553aaa5925a32824d9a08c7dc8a9bf068e` |
+
+本表是候选文件完整性证据；Windows 安装通过须等实际 Actions 运行。

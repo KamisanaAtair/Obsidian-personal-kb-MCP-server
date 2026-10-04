@@ -1,0 +1,15 @@
+{
+  "version": "0.4.0b2",
+  "artifacts": [
+    {
+      "file": "PersonalKB-0.4.0b2-windows-x64.zip",
+      "bytes": 17571340,
+      "sha256": "8171a17918643023983b62b9bea39ce19cdaef0d99199279d3cf7944addb33e0"
+    },
+    {
+      "file": "PersonalKB-0.4.0b2-macos-arm64.zip",
+      "bytes": 16846127,
+      "sha256": "e92e70e889b68dfa01bb674ee5f95e553aaa5925a32824d9a08c7dc8a9bf068e"
+    }
+  ]
+}

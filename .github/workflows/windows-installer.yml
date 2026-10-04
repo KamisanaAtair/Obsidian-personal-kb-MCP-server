@@ -1,0 +1,45 @@
+name: Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/local-installer-preview]
+    paths:
+      - 'install*.*'
+      - 'installer/**'
+      - 'scripts/*installer*'
+      - 'local_app/**'
+      - 'mcp_server/**'
+      - 'config/**'
+      - 'core/**'
+      - 'pyproject.toml'
+      - '.gitattributes'
+      - '.gitignore'
+      - 'preview-releases/**'
+      - '.github/workflows/windows-installer.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: Windows / ${{ matrix.source }}
+    runs-on: windows-2022
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        source: [checkout, source-zip, platform-zip]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+      - name: Verify actual cmd installer and installed HTTP MCP
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: utf-8
+        run: python scripts/windows_installer_smoke.py --case '${{ matrix.source }}'
