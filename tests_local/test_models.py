@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 from local_app.models import MemoryCredentialStore, ModelError, ModelService
+from local_app.models.multimodal import test_wav as sample_wav
 from local_app.models.providers import PROVIDERS, normalize_url, request_body
 
 
@@ -69,6 +70,25 @@ def test_secret_never_written_and_snapshot_uses_immutable_credential(service):
     assert "synthetic-key" not in service.path.read_text()
     assert "synthetic-key" not in json.dumps(before)
     assert service.path.stat().st_mode & 0o777 == 0o600
+
+
+def test_plan_key_prefix_is_opaque_and_uses_user_selected_https_endpoint(service):
+    # A synthetic prefix is accepted; this does not verify any real subscription.
+    key = "sk-sp-synthetic-not-a-real-credential"
+    endpoint = "https://user-selected.example.invalid/v1"
+    profile = add(service, "qwen", base_url=endpoint, model_id="qwen-plus", api_key=key)
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        assert str(request.url) == endpoint + "/chat/completions"
+        assert request.headers["Authorization"] == "Bearer " + key
+        return httpx.Response(200, content=stream(delta("你好", finish_reason="stop")))
+
+    mock(service, handler)
+    assert service.test_connection(profile["id"])["success"] is True
+    assert len(requests) == 1 and requests[0].method == "POST"
+    assert key not in service.path.read_text() + json.dumps(service.public_config())
 
 
 def test_snapshots_remain_stable_after_configuration_changes(service):
@@ -251,27 +271,132 @@ def test_direct_streaming_preserves_unicode_counts_and_emits_only_answer(service
         (429, "rate_limited"),
         (302, "redirect_rejected"),
         (500, "provider_unavailable"),
+        (501, "provider_unavailable"),
+        (502, "provider_unavailable"),
+        (503, "provider_unavailable"),
+        (504, "provider_unavailable"),
         (404, "not_found"),
+        (405, "request_rejected"),
         (400, "request_rejected"),
     ],
 )
-def test_http_errors_are_redacted_and_never_retried_or_redirected(service, status, code):
-    snapshot = activate(service, add(service, api_key="synthetic-sensitive"))
+@pytest.mark.parametrize("operation", ["generate", "list_models", "transcribe"])
+def test_http_errors_are_redacted_and_never_retried_or_redirected(
+    service, status, code, operation
+):
+    profile = add(
+        service,
+        api_key="synthetic-sensitive",
+        capabilities=["text", "asr"],
+        capability_models={"vision": "", "asr": "synthetic-asr"},
+        audio_api_style="openai_audio",
+    )
+    snapshot = activate(service, profile)
     requests = []
 
     def handler(request):
         requests.append(request)
         return httpx.Response(
             status,
-            headers={"Location": "https://other.example"},
-            text="synthetic-sensitive and private prompt",
+            headers={"Location": "https://other.example/synthetic-sensitive?data=private-prompt"},
+            text="<html>synthetic-sensitive and private prompt</html>",
         )
 
     mock(service, handler)
     with pytest.raises(ModelError) as exc:
-        service.generate(snapshot, "private prompt")
+        if operation == "list_models":
+            service.list_models(profile["id"])
+        elif operation == "transcribe":
+            with sample_wav() as audio:
+                service.transcribe(service.profile_snapshot(profile["id"], "asr"), audio)
+        else:
+            service.generate(snapshot, "private prompt")
     assert exc.value.code == code
-    assert "synthetic-sensitive" not in str(exc.value) and "private prompt" not in str(exc.value)
+    message = str(exc.value)
+    assert f"HTTP {status}" in message
+    assert not any(
+        value in message for value in ("synthetic-sensitive", "private", "other.example", "<html>")
+    )
+    if status == 502:
+        assert "无效的上游响应" in message
+    elif status == 503:
+        assert "无法提供服务" in message
+    elif status == 504:
+        assert "等待上游响应超时" in message
+    if operation != "list_models":
+        assert "模型列表" not in message and "文字连接测试" not in message
+    assert len(requests) == 1
+
+
+@pytest.mark.parametrize("status", [404, 405, 501])
+def test_missing_model_list_allows_manual_model_and_text_test(service, status):
+    profile = add(service, api_key="synthetic-key")
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        if request.method == "GET":
+            return httpx.Response(status, text="<html>synthetic-key</html>")
+        assert json.loads(request.content)["model"] == "official-model-from-console"
+        return httpx.Response(200, content=stream(delta("你好", finish_reason="stop")))
+
+    mock(service, handler)
+    with pytest.raises(ModelError) as exc:
+        service.list_models(profile["id"])
+    assert f"HTTP {status}" in str(exc.value)
+    assert "可能未提供模型列表接口" in str(exc.value)
+    assert "手动填写官方支持的模型 ID" in str(exc.value)
+    assert "文字连接测试" in str(exc.value)
+    assert len(requests) == 1
+    service.save_config(
+        {"profile": {"id": profile["id"], "model_id": "official-model-from-console"}}
+    )
+    result = service.test_connection(profile["id"])
+    assert result["success"] is True and result["text"] == "你好"
+    assert len(requests) == 2
+    assert service.public_config()["profiles"][0]["test_status"] == "passed"
+
+
+@pytest.mark.parametrize(
+    "body,failure,code",
+    [
+        (b'{"code":"synthetic-sensitive","message":"private prompt"}', None, "request_rejected"),
+        (b"<html>synthetic-sensitive and private prompt</html>", None, "invalid_response"),
+        (b"", httpx.ReadTimeout, "timeout"),
+        (b"", httpx.ReadError, "connection_failed"),
+        (b"", RuntimeError, "transcription_failed"),
+    ],
+)
+def test_native_asr_error_body_retains_http_400_without_leaking(service, body, failure, code):
+    profile = add(
+        service,
+        "qwen",
+        base_url=PROVIDERS["qwen"]["default_base_url"],
+        api_key="synthetic-sensitive",
+        capabilities=["asr"],
+        capability_models={"vision": "", "asr": "synthetic-asr"},
+        audio_api_style="dashscope",
+    )
+    requests = []
+
+    class FailingStream(httpx.SyncByteStream):
+        def __iter__(self):
+            yield b"synthetic-sensitive"
+            raise failure("synthetic-sensitive and private prompt")
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(
+            400,
+            **({"stream": FailingStream()} if failure else {"content": body}),
+            headers={"Location": "https://other.example/synthetic-sensitive"},
+        )
+
+    mock(service, handler)
+    with sample_wav() as audio, pytest.raises(ModelError) as exc:
+        service.transcribe(service.profile_snapshot(profile["id"], "asr"), audio)
+    assert exc.value.code == code and "HTTP 400" in str(exc.value)
+    assert not any(value in str(exc.value) for value in ("synthetic", "private", "other.example"))
     assert len(requests) == 1
 
 

@@ -73,24 +73,46 @@ def _short_text(value, limit, allow_empty=False):
     return value
 
 
-def _http_error(status):
+def _http_error(status, *, model_list=False):
+    prefix = f"HTTP {status}："
+    if model_list and status in {404, 405, 501}:
+        code = {404: "not_found", 405: "request_rejected", 501: "provider_unavailable"}[status]
+        return ModelError(
+            code,
+            prefix + "该地址可能未提供模型列表接口；可手动填写官方支持的模型 ID，"
+            "再运行文字连接测试。",
+        )
     if status in {401, 403}:
         return ModelError(
-            "authentication_failed", "模型服务拒绝认证，请检查 API Key、地域和模型权限。"
+            "authentication_failed", prefix + "模型服务拒绝认证，请检查 API Key、地域和模型权限。"
         )
     if status == 429:
         return ModelError(
-            "rate_limited", "模型服务限流或额度不足，请在服务商控制台检查后手动重试。"
+            "rate_limited", prefix + "模型服务限流或额度不足，请在服务商控制台检查后手动重试。"
         )
     if 300 <= status < 400:
         return ModelError(
-            "redirect_rejected", "模型地址发生重定向，已停止发送；请填写最终官方 API 地址。"
+            "redirect_rejected", prefix + "模型地址发生重定向，已停止发送；请填写最终官方 API 地址。"
         )
     if status == 404:
-        return ModelError("not_found", "模型或接口不存在，请检查模型 ID 与服务地址。")
+        return ModelError("not_found", prefix + "模型或接口不存在，请检查模型 ID 与服务地址。")
+    if status == 502:
+        return ModelError(
+            "provider_unavailable", prefix + "模型服务网关收到了无效的上游响应，请稍后手动重试。"
+        )
+    if status == 503:
+        return ModelError(
+            "provider_unavailable", prefix + "模型服务暂时无法提供服务，请稍后手动重试。"
+        )
+    if status == 504:
+        return ModelError(
+            "provider_unavailable", prefix + "模型服务网关等待上游响应超时，请稍后手动重试。"
+        )
     if status >= 500:
-        return ModelError("provider_unavailable", "模型服务暂时不可用，请稍后手动重试。")
-    return ModelError("request_rejected", "模型服务拒绝请求，请检查模型、参数和账户额度。")
+        return ModelError("provider_unavailable", prefix + "模型服务暂时不可用，请稍后手动重试。")
+    return ModelError(
+        "request_rejected", prefix + "模型服务拒绝请求，请检查模型、参数和账户额度。"
+    )
 
 
 class ModelService:
@@ -805,7 +827,7 @@ class ModelService:
                 follow_redirects=False,
             ) as response:
                 if not 200 <= response.status_code < 300:
-                    raise _http_error(response.status_code)
+                    raise _http_error(response.status_code, model_list=True)
                 data = b""
                 for chunk in response.iter_bytes():
                     data += chunk
@@ -907,6 +929,7 @@ class ModelService:
         headers["Accept"] = "application/json"
         if "files" in arguments:
             headers.pop("Content-Type", None)
+        error_prefix = ""
         try:
             started = time.monotonic()
             with self.client.stream(
@@ -915,10 +938,14 @@ class ModelService:
                 follow_redirects=False,
             ) as response:
                 if not 200 <= response.status_code < 300:
+                    error_prefix = f"HTTP {response.status_code}："
                     # DashScope reports a silent interval as a typed 400 response.
                     # Consume only a bounded JSON body; never expose its free text.
                     if response.status_code == 400 and profile["audio_api_style"] == "dashscope":
-                        value = self._audio_json(response, started, profile["timeout_seconds"])
+                        try:
+                            value = self._audio_json(response, started, profile["timeout_seconds"])
+                        except ModelError as error:
+                            raise ModelError(error.code, "HTTP 400：" + error.message) from None
                         if value.get("code") == "ASR_RESPONSE_HAVE_NO_WORDS":
                             return ""
                     raise _http_error(response.status_code)
@@ -941,11 +968,17 @@ class ModelService:
         except ModelError:
             raise
         except httpx.TimeoutException:
-            raise ModelError("timeout", "转写请求超时，未自动重试；请确认后手动重试。") from None
+            raise ModelError(
+                "timeout", error_prefix + "转写请求超时，未自动重试；请确认后手动重试。"
+            ) from None
         except httpx.HTTPError:
-            raise ModelError("connection_failed", "无法连接转写服务，请检查地址与网络。") from None
+            raise ModelError(
+                "connection_failed", error_prefix + "无法连接转写服务，请检查地址与网络。"
+            ) from None
         except Exception:
-            raise ModelError("transcription_failed", "转写未完成，请检查接口配置后手动重试。") from None
+            raise ModelError(
+                "transcription_failed", error_prefix + "转写未完成，请检查接口配置后手动重试。"
+            ) from None
 
     @staticmethod
     def _audio_json(response, started, timeout):

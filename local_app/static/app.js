@@ -32,7 +32,7 @@
   const jobNames = { prepare_semantic:'准备语义检索', prepare_video:'准备视频组件', index_vault:'建立或同步索引', index:'建立检索索引', query:'知识库问答', qa:'知识库问答', correlation:'关联分析', video_prepare:'视频转写', ingest:'整理笔记', generate_note:'整理笔记', model_test:'测试模型连接' };
   const statusNames = { queued:'排队中', pending:'排队中', running:'进行中', completed:'已完成', succeeded:'已完成', failed:'失败，可重试', interrupted:'已中断，可恢复', cancelled:'已停止', stale:'来源已变化' };
   const providerSymbols = { qwen:'Q', kimi:'K', glm:'G', deepseek:'D', ollama:'◉', custom:'⌘' };
-  const providerShortNames = { qwen:'通义千问', kimi:'Kimi', glm:'智谱 GLM', deepseek:'DeepSeek', ollama:'本地 Ollama', custom:'自定义服务' };
+  const providerShortNames = { qwen:'Qwen · 百炼 API', kimi:'Kimi', glm:'智谱 GLM', deepseek:'DeepSeek', ollama:'本地 Ollama', custom:'自定义服务' };
   const capabilityNames = {text:'文字',vision:'视觉',asr:'语音'};
   const capabilitiesOf = profile => Array.isArray(profile.capabilities) ? profile.capabilities : ['text'];
   const modelFor = (profile, capability) => capability === 'text' ? profile.model_id || '' : (profile.capability_models || {})[capability] || '';
@@ -316,6 +316,7 @@
       byId('audio-api-style').value = id === 'qwen' ? 'dashscope' : 'openai_audio';
     }
     byId('provider-hint').textContent = provider.hint || '请使用该服务商的模型 API 地址和对应凭据。';
+    byId('qwen-plan-hint').hidden = id !== 'qwen';
     const regions = provider.regions || [];
     byId('provider-region-field').hidden = !regions.length;
     byId('provider-region').replaceChildren();

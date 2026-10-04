@@ -1,7 +1,9 @@
 """Provider presets and explicit capability mapping, checked against official docs.
 
-Sources (2026-10-03):
+Sources (Qwen connection guidance rechecked 2026-10-04):
 https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope
+https://help.aliyun.com/zh/model-studio/base-url
+https://help.aliyun.com/zh/model-studio/coding-plan
 https://help.aliyun.com/zh/model-studio/deep-thinking
 https://huggingface.co/moonshotai/Kimi-K2.5
 https://raw.githubusercontent.com/MoonshotAI/kimi-cli/main/packages/kosong/src/kosong/chat_provider/kimi.py
@@ -33,7 +35,7 @@ LEGACY_QWEN3_ALWAYS_THINK_TEMPLATE = (
 
 PROVIDERS = {
     "qwen": {
-        "name": "通义千问 Qwen",
+        "name": "Qwen · 百炼按量 API",
         "default_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "default_model": "qwen-plus",
         "api_style": "openai_chat",
@@ -49,7 +51,10 @@ PROVIDERS = {
             "qwen3.8-max",
         ],
         "help_url": "https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope",
-        "hint": "使用阿里云百炼 API Key；密钥须与地域匹配。可填写控制台推荐的业务空间专属域名。",
+        "hint": (
+            "普通百炼按量 API，非 Coding Plan 套餐。Key、地域和业务空间须匹配；"
+            "支持控制台提供的业务空间专属 Base URL。"
+        ),
         "regions": [
             {"name": "中国北京", "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
             {
