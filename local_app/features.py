@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import hashlib
-from http.client import HTTPException
 import importlib
 import importlib.util
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
@@ -17,6 +15,8 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+from http.client import HTTPException
+from pathlib import Path
 
 
 class SlowDownload(OSError):
@@ -130,9 +130,10 @@ def download_verified(
 
 
 class FeatureManager:
-    def __init__(self, data_dir: Path, jobs):
+    def __init__(self, data_dir: Path, jobs, models=None):
         self.data = data_dir
         self.jobs = jobs
+        self.models = models
         self.release = Path(__file__).resolve().parents[1] / "installer"
         self.lock = threading.RLock()
         self.feature_path = self.data / "features.json"
@@ -206,18 +207,28 @@ class FeatureManager:
     def status(self):
         self._reconcile()
         state = read_json(self.feature_path)
-        credentials = read_json(self.data / "credentials.json")
+        configured = False
+        if self.models is not None:
+            from .models import ModelError
+
+            try:
+                self.models.snapshot("asr")
+                configured = True
+            except ModelError:
+                pass
         video = {
             **state.get("video", {}),
-            "key_saved": bool(credentials.get("dashscope_api_key")),
+            "key_saved": configured,
+            "asr_configured": configured,
         }
         return {"semantic": state.get("semantic", {"ready": False}), "video": video}
 
     def save_key(self, value: str):
-        value = value.strip()
-        if len(value) > 1024 or any(ch in value for ch in "\r\n\x00"):
-            raise ValueError("API Key 格式不正确。")
-        atomic_json(self.data / "credentials.json", {"dashscope_api_key": value})
+        if self.models is None:
+            raise ValueError("请通过本机统一模型设置保存密钥。")
+        from .secret_setup import SecretSetup
+
+        return SecretSetup(self.data, self.models).save_legacy_key(value)
         return {"key_saved": bool(value), "key_validated": False}
 
     def prepare(self, feature: str):

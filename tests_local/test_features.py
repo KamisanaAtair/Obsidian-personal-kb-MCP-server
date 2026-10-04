@@ -1,11 +1,12 @@
 import hashlib
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
 from local_app.features import FeatureManager, atomic_json, download_verified
 from local_app.jobs import JobManager
+from local_app.models import MemoryCredentialStore, ModelService
 
 
 @pytest.fixture
@@ -89,10 +90,15 @@ def test_short_response_retains_bytes_and_retries_with_range(
 
 
 def test_status_never_exposes_key(tmp_path):
-    manager = FeatureManager(tmp_path, JobManager(tmp_path))
-    manager.save_key("synthetic-value-for-local-test")
-    assert manager.status()["video"]["key_saved"] is True
-    assert "synthetic" not in str(manager.status())
+    models = ModelService(tmp_path, MemoryCredentialStore())
+    try:
+        manager = FeatureManager(tmp_path, JobManager(tmp_path), models)
+        manager.save_key("synthetic-value-for-local-test")
+        assert manager.status()["video"]["key_saved"] is True
+        assert "synthetic" not in str(manager.status())
+        assert not (tmp_path / "credentials.json").exists()
+    finally:
+        models.close()
 
 
 def test_new_runtime_invalidates_shared_readiness_but_keeps_model_cache(tmp_path):

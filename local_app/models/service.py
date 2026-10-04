@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import re
 import threading
@@ -22,6 +23,14 @@ from local_app.features import atomic_json
 
 from .credentials import SystemCredentialStore
 from .errors import ModelError
+from .multimodal import (
+    CAPABILITIES,
+    audio_request,
+    read_wav,
+    test_image,
+    test_wav,
+    validate_images,
+)
 from .providers import (
     LEGACY_QWEN3_ALWAYS_THINK_TEMPLATE,
     PROVIDERS,
@@ -43,6 +52,9 @@ PROFILE_FIELDS = {
     "timeout_seconds",
     "max_output_tokens",
     "thinking",
+    "capabilities",
+    "capability_models",
+    "audio_api_style",
 }
 
 
@@ -114,15 +126,17 @@ class ModelService:
                 "profiles": [],
                 "default_profile": None,
                 "task_profiles": {key: None for key in TASKS},
+                "capability_profiles": {key: None for key in CAPABILITIES},
             }
         try:
             value = json.loads(self.path.read_text(encoding="utf-8"))
             if value.get("schema_version") != 1 or not isinstance(value.get("profiles"), list):
                 raise ValueError
             _integer(value["revision"], 0, 2**63 - 1)
+            value.setdefault("capability_profiles", {key: None for key in CAPABILITIES})
+            value["profiles"] = [self._normalize_profile(p, p) for p in value["profiles"]]
             self._validate_routes(value, check_keys=False)
             for profile in value["profiles"]:
-                self._normalize_profile(profile, profile)
                 for ref in profile.get("credential_history", []):
                     self._check_reference(ref)
                 if profile.get("credential_ref"):
@@ -155,6 +169,14 @@ class ModelService:
                 "credential_store_unavailable", "系统凭据库读取失败，请检查系统授权。"
             ) from None
 
+    def verify_saved_key(self, profile_id, key):
+        """Verify a completed credential import without exposing the stored value."""
+        if not isinstance(key, str) or not key:
+            return False
+        with self._lock:
+            saved = self._key(self._profile(profile_id))
+            return isinstance(saved, str) and hmac.compare_digest(saved.encode(), key.encode())
+
     def _public_profile(self, profile):
         value = {key: deepcopy(profile.get(key)) for key in PROFILE_FIELDS}
         value.update(
@@ -163,6 +185,7 @@ class ModelService:
                 for key in ("revision", "tested_revision", "tested_at", "test_status")
             }
         )
+        value["capability_test_status"] = deepcopy(profile["capability_test_status"])
         try:
             value["credential_present"] = bool(self._key(profile))
             value["credential_error"] = None
@@ -181,6 +204,7 @@ class ModelService:
                     "generation_mode",
                     "default_profile",
                     "task_profiles",
+                    "capability_profiles",
                 )
             }
             value["profiles"] = [
@@ -215,6 +239,10 @@ class ModelService:
                 "test_status": "untested",
             }
         )
+        profile.setdefault("capabilities", ["text"])
+        profile.setdefault("capability_models", {key: "" for key in CAPABILITIES})
+        profile.setdefault("audio_api_style", "dashscope" if provider == "qwen" else "openai_audio")
+        profile.setdefault("capability_test_status", self._empty_capability_tests())
         if previous and previous["provider"] != provider:
             profile.update(
                 provider=provider,
@@ -222,6 +250,7 @@ class ModelService:
                 base_url=preset["default_base_url"],
                 model_id=preset["default_model"],
                 thinking="default",
+                audio_api_style="dashscope" if provider == "qwen" else "openai_audio",
             )
         profile.update({key: payload[key] for key in PROFILE_FIELDS if key in payload})
         if not isinstance(profile["id"], str) or not re.fullmatch(
@@ -237,7 +266,21 @@ class ModelService:
             raise ModelError("invalid_api_style", "该服务商不支持所选接口类型。")
         if profile["thinking"] not in {"default", "enabled", "disabled"}:
             raise ModelError("invalid_thinking", "思考模式必须为模型默认、开启或关闭。")
-        request_body(profile, "参数校验")
+        capabilities = profile["capabilities"]
+        if (not isinstance(capabilities, list) or not capabilities
+                or any(not isinstance(c, str) or c not in {"text", *CAPABILITIES} for c in capabilities)
+                or len(capabilities) != len(set(capabilities))):
+            raise ModelError("invalid_capabilities", "请选择文本、视觉或语音转写能力，不能重复。")
+        models = profile["capability_models"]
+        if not isinstance(models, dict) or set(models) != set(CAPABILITIES):
+            raise ModelError("invalid_capability_models", "能力型号必须包含视觉和语音转写字段。")
+        profile["capability_models"] = {
+            key: _short_text(models[key], 200, allow_empty=True) for key in CAPABILITIES
+        }
+        if profile["audio_api_style"] not in {"dashscope", "openai_audio"}:
+            raise ModelError("invalid_audio_api_style", "请选择 DashScope 或兼容语音转写接口。")
+        if "text" in capabilities and profile["model_id"]:
+            request_body(profile, "参数校验")
         return profile
 
     def _validate_routes(self, value, check_keys=True):
@@ -252,6 +295,16 @@ class ModelService:
         for identity in [value["default_profile"], *routes.values()]:
             if identity is not None and (not isinstance(identity, str) or identity not in profiles):
                 raise ModelError("invalid_route", "选中的模型连接不存在。")
+        capabilities = value.get("capability_profiles")
+        if not isinstance(capabilities, dict) or set(capabilities) != set(CAPABILITIES):
+            raise ModelError("invalid_route", "能力路由必须包含视觉和语音转写。")
+        for capability, identity in capabilities.items():
+            if identity is None:
+                continue
+            if not isinstance(identity, str) or identity not in profiles:
+                raise ModelError("invalid_route", "选中的能力连接不存在。")
+            if capability not in profiles[identity]["capabilities"]:
+                raise ModelError("unsupported_capability", "所选连接未启用对应能力。")
         if value["generation_mode"] == "independent":
             for task in TASKS:
                 identity = routes[task] or value["default_profile"]
@@ -260,6 +313,8 @@ class ModelService:
                         "missing_route", "启用独立生成前，请选择默认模型或为全部任务指定模型。"
                     )
                 profile = profiles[identity]
+                if "text" not in profile["capabilities"]:
+                    raise ModelError("unsupported_capability", "文本任务须选择启用文本能力的连接。")
                 if not profile["model_id"]:
                     raise ModelError("missing_model", "启用独立生成前，请填写模型 ID。")
                 if check_keys and requires_key(profile) and not self._key(profile):
@@ -272,6 +327,7 @@ class ModelService:
             "generation_mode",
             "default_profile",
             "task_profiles",
+            "capability_profiles",
             "profile",
         }:
             raise ModelError("invalid_config", "模型设置请求包含未知字段。")
@@ -329,7 +385,8 @@ class ModelService:
                         profile.setdefault("credential_history", []).append(new_reference)
                     if profile != previous:
                         profile["revision"] += 1
-                        profile.update(tested_revision=None, tested_at=None, test_status="untested")
+                        profile.update(tested_revision=None, tested_at=None, test_status="untested",
+                                       capability_test_status=self._empty_capability_tests())
                     updated["profiles"] = [
                         profile if p["id"] == profile["id"] else p for p in updated["profiles"]
                     ]
@@ -360,6 +417,16 @@ class ModelService:
                     ):
                         raise ModelError("invalid_route", "任务模型必须是连接 ID 或空值。")
                     updated["task_profiles"].update(
+                        {key: identity or None for key, identity in routes.items()}
+                    )
+                if "capability_profiles" in payload:
+                    routes = payload["capability_profiles"]
+                    if not isinstance(routes, dict) or set(routes) - set(CAPABILITIES):
+                        raise ModelError("invalid_route", "能力路由包含未知能力。")
+                    if any(identity is not None and not isinstance(identity, str)
+                           for identity in routes.values()):
+                        raise ModelError("invalid_route", "能力连接必须是连接 ID 或空值。")
+                    updated["capability_profiles"].update(
                         {key: identity or None for key, identity in routes.items()}
                     )
                 self._validate_routes(updated)
@@ -399,6 +466,7 @@ class ModelService:
             if identity in [
                 self._config["default_profile"],
                 *self._config["task_profiles"].values(),
+                *self._config["capability_profiles"].values(),
             ]:
                 raise ModelError(
                     "profile_in_use", "该连接仍被默认模型或任务引用，请先解除引用或选择其他连接。"
@@ -430,7 +498,37 @@ class ModelService:
         )
         return value
 
+    @staticmethod
+    def _empty_capability_tests():
+        return {key: {"status": "untested", "tested_revision": None, "tested_at": None}
+                for key in CAPABILITIES}
+
+    def profile_snapshot(self, profile_id, capability="text"):
+        if capability not in {"text", *CAPABILITIES}:
+            raise ModelError("invalid_capability", "未知模型能力。")
+        with self._lock:
+            profile = self._profile(profile_id)
+            if capability not in profile["capabilities"]:
+                raise ModelError("unsupported_capability", "该连接未启用所需能力。")
+            value = self._snapshot_profile(profile)
+            value["capability"] = capability
+            if capability != "text":
+                value["model_id"] = profile["capability_models"][capability]
+                value["thinking"] = "default"
+            if not value["model_id"]:
+                raise ModelError("missing_model", "请先填写所选能力的模型 ID。")
+            self._headers(value)
+            if capability == "asr":
+                audio_request(value, b"")  # Validate the destination without making a request.
+            return value
+
     def snapshot(self, task):
+        if task in CAPABILITIES:
+            with self._lock:
+                identity = self._config["capability_profiles"][task]
+                if not identity:
+                    raise ModelError("missing_route", "请在模型设置中选择所需能力的连接。")
+                return self.profile_snapshot(identity, task)
         if task not in TASKS:
             raise ModelError("invalid_task", "未知模型任务。")
         with self._lock:
@@ -479,11 +577,30 @@ class ModelService:
             except UnicodeError:
                 raise ModelError("invalid_stream", "模型返回了无效编码的流式响应。") from None
 
-    def generate(self, snapshot, prompt, on_event=None):
+    def generate(self, snapshot, prompt, on_event=None, *, images=None):
         if snapshot.get("generation_mode") != "independent":
             raise ModelError("host_mode", "当前任务使用宿主模型，请使用宿主生成流程。")
         profile = self._normalize_profile(snapshot, snapshot)
+        pictures = validate_images(images)
+        capability = snapshot.get("capability", "text")
+        if pictures:
+            if capability != "vision" or "vision" not in profile["capabilities"]:
+                raise ModelError("unsupported_capability", "图片必须使用明确配置的视觉能力。")
+        elif capability == "vision":
+            raise ModelError("missing_images", "视觉调用需要至少一张真实图片。")
+        elif capability != "text" or "text" not in profile["capabilities"]:
+            raise ModelError("unsupported_capability", "该快照不能用于文本生成。")
         adapter = ModelFactory.create(profile)
+        body = adapter.request_body(prompt)
+        if pictures:
+            if adapter.stream_format == "ndjson":
+                body["messages"][0]["images"] = [item["data"] for item in pictures]
+            else:
+                body["messages"][0]["content"] = [{"type": "text", "text": prompt}] + [
+                    {"type": "image_url", "image_url": {
+                        "url": "data:" + item["mime_type"] + ";base64," + item["data"]
+                    }} for item in pictures
+                ]
         if not profile["model_id"]:
             raise ModelError("missing_model", "请先填写模型 ID。")
         if (
@@ -610,7 +727,7 @@ class ModelService:
                 "POST",
                 profile["base_url"] + adapter.chat_path,
                 headers=headers,
-                json=adapter.request_body(prompt),
+                json=body,
                 timeout=httpx.Timeout(
                     profile["timeout_seconds"], connect=min(15, profile["timeout_seconds"])
                 ),
@@ -778,34 +895,114 @@ class ModelService:
                     "本地模型未声明支持所选思考开关，请选择“模型默认”或使用支持该开关的模型。",
                 )
 
-    def test_connection(self, profile_id, on_event=None):
-        with self._lock:
-            snapshot = self._snapshot_profile(self._profile(profile_id))
+    def transcribe(self, snapshot, wav_path):
+        if snapshot.get("generation_mode") != "independent" or snapshot.get("capability") != "asr":
+            raise ModelError("unsupported_capability", "语音转写需要明确配置的 ASR 能力。")
+        profile = self._normalize_profile(snapshot, snapshot)
+        if "asr" not in profile["capabilities"] or not profile["model_id"]:
+            raise ModelError("missing_model", "请先配置语音转写能力与模型 ID。")
+        audio = read_wav(wav_path)
+        url, arguments = audio_request(profile, audio)
+        headers = self._headers(profile)
+        headers["Accept"] = "application/json"
+        if "files" in arguments:
+            headers.pop("Content-Type", None)
         try:
-            result = self.generate(snapshot, "这是连接测试。请只回复两个汉字：你好。", on_event)
+            started = time.monotonic()
+            with self.client.stream(
+                "POST", url, headers=headers, **arguments,
+                timeout=httpx.Timeout(profile["timeout_seconds"], connect=15),
+                follow_redirects=False,
+            ) as response:
+                if not 200 <= response.status_code < 300:
+                    # DashScope reports a silent interval as a typed 400 response.
+                    # Consume only a bounded JSON body; never expose its free text.
+                    if response.status_code == 400 and profile["audio_api_style"] == "dashscope":
+                        value = self._audio_json(response, started, profile["timeout_seconds"])
+                        if value.get("code") == "ASR_RESPONSE_HAVE_NO_WORDS":
+                            return ""
+                    raise _http_error(response.status_code)
+                value = self._audio_json(response, started, profile["timeout_seconds"])
+            if value.get("error") or value.get("code"):
+                raise ModelError("provider_error", "转写服务返回错误，请检查服务商控制台。")
+            if profile["audio_api_style"] == "openai_audio":
+                text = value.get("text")
+            else:
+                output = value.get("output", {})
+                choices = output.get("choices", [])
+                content = choices[0].get("message", {}).get("content", []) if choices else []
+                text = "\n".join(item["text"] for item in content
+                                 if isinstance(item, dict) and isinstance(item.get("text"), str))
+                if not content:
+                    text = output.get("text")
+            if not isinstance(text, str):
+                raise ModelError("invalid_response", "转写接口没有返回有效文本字段。")
+            return text.strip()
         except ModelError:
-            self._record_test(profile_id, snapshot["profile_revision"], False)
             raise
-        applied = self._record_test(profile_id, snapshot["profile_revision"], True)
-        return dict(
-            result,
-            success=True,
-            tested_revision=snapshot["profile_revision"],
-            current_config_tested=applied,
-        )
+        except httpx.TimeoutException:
+            raise ModelError("timeout", "转写请求超时，未自动重试；请确认后手动重试。") from None
+        except httpx.HTTPError:
+            raise ModelError("connection_failed", "无法连接转写服务，请检查地址与网络。") from None
+        except Exception:
+            raise ModelError("transcription_failed", "转写未完成，请检查接口配置后手动重试。") from None
 
-    def _record_test(self, identity, revision, success):
+    @staticmethod
+    def _audio_json(response, started, timeout):
+        content = bytearray()
+        for chunk in response.iter_bytes():
+            if time.monotonic() - started > timeout:
+                raise ModelError("timeout", "转写响应超时，未自动重试。")
+            if len(content) + len(chunk) > 2 * 1024 * 1024:
+                raise ModelError("response_too_large", "转写响应超过大小限制。")
+            content.extend(chunk)
+        try:
+            value = json.loads(content)
+            if not isinstance(value, dict):
+                raise ValueError
+            return value
+        except (ValueError, TypeError):
+            raise ModelError("invalid_response", "转写接口返回无效 JSON。") from None
+
+    def test_connection(self, profile_id, on_event=None, *, capability="text"):
+        snapshot = self.profile_snapshot(profile_id, capability)
+        try:
+            if capability == "asr":
+                started = time.monotonic()
+                with test_wav() as audio:
+                    text = self.transcribe(snapshot, audio)
+                result = {"text": text, "model": {"profile_id": profile_id,
+                          "model_id": snapshot["model_id"], "provider": snapshot["provider"]},
+                          "usage": {"input_tokens": None, "output_tokens": None},
+                          "metrics": {"first_event_ms": None, "first_text_ms": None,
+                                      "total_ms": round((time.monotonic() - started) * 1000, 1)}}
+            elif capability == "vision":
+                result = self.generate(snapshot, "连接测试：请描述图片颜色。", on_event,
+                                       images=[test_image()])
+            else:
+                result = self.generate(snapshot, "这是连接测试。请只回复两个汉字：你好。", on_event)
+        except ModelError:
+            self._record_test(profile_id, snapshot["profile_revision"], False, capability)
+            raise
+        applied = self._record_test(profile_id, snapshot["profile_revision"], True, capability)
+        return dict(result, success=True, capability=capability,
+                    tested_revision=snapshot["profile_revision"], current_config_tested=applied)
+
+    def _record_test(self, identity, revision, success, capability="text"):
         with self._lock:
             profile = next((p for p in self._config["profiles"] if p["id"] == identity), None)
             if profile is None or profile["revision"] != revision:
                 return False
             updated = deepcopy(self._config)
             target = next(p for p in updated["profiles"] if p["id"] == identity)
-            target.update(
-                tested_revision=revision if success else None,
-                tested_at=time.time(),
-                test_status="passed" if success else "failed",
-            )
+            if capability == "text":
+                target.update(tested_revision=revision if success else None,
+                              tested_at=time.time(), test_status="passed" if success else "failed")
+            else:
+                target["capability_test_status"][capability] = {
+                    "tested_revision": revision if success else None,
+                    "tested_at": time.time(), "status": "passed" if success else "failed",
+                }
             try:
                 atomic_json(self.path, updated)
             except Exception:

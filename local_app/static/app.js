@@ -33,6 +33,9 @@
   const statusNames = { queued:'排队中', pending:'排队中', running:'进行中', completed:'已完成', succeeded:'已完成', failed:'失败，可重试', interrupted:'已中断，可恢复', cancelled:'已停止', stale:'来源已变化' };
   const providerSymbols = { qwen:'Q', kimi:'K', glm:'G', deepseek:'D', ollama:'◉', custom:'⌘' };
   const providerShortNames = { qwen:'通义千问', kimi:'Kimi', glm:'智谱 GLM', deepseek:'DeepSeek', ollama:'本地 Ollama', custom:'自定义服务' };
+  const capabilityNames = {text:'文字',vision:'视觉',asr:'语音'};
+  const capabilitiesOf = profile => Array.isArray(profile.capabilities) ? profile.capabilities : ['text'];
+  const modelFor = (profile, capability) => capability === 'text' ? profile.model_id || '' : (profile.capability_models || {})[capability] || '';
 
   function message(text, error = false) {
     const target = byId(error ? 'error' : 'notice');
@@ -64,7 +67,12 @@
     if (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); }
     try { return await callback(); }
     catch (error) { message(errorText(error), true); }
-    finally { if (button) { button.disabled = false; button.removeAttribute('aria-busy'); } }
+    finally {
+      if (button) {
+        button.disabled = false; button.removeAttribute('aria-busy');
+        if (['test-profile','list-models','import-template-key','import-legacy-key'].includes(button.id)) updateProfileButtons();
+      }
+    }
   }
   function showPage(page) {
     document.querySelectorAll('.page').forEach(element => { element.hidden = element.id !== 'page-' + page; });
@@ -142,10 +150,10 @@
       const semantic = state.features && state.features.semantic || {};
       const video = state.features && state.features.video || {};
       byId('semantic-state').textContent = semantic.ready ? '已就绪' : semantic.phase === 'failed' ? '准备失败，可重试' : semantic.phase === 'preparing' ? '后台准备中' : '尚未准备';
-      byId('video-state').textContent = video.ready ? (video.key_saved ? '组件就绪 · Key 已保存' : '组件就绪 · 需要音频 Key') : video.phase === 'failed' ? '准备失败，可重试' : video.phase === 'preparing' ? '后台准备中' : '未启用';
+      byId('video-state').textContent = video.ready ? '视频组件已就绪' : video.phase === 'failed' ? '准备失败，可重试' : video.phase === 'preparing' ? '后台准备中' : '未启用';
       byId('prepare-semantic').disabled = !!semantic.ready || semantic.phase === 'preparing';
       byId('prepare-video').disabled = !!video.ready || video.phase === 'preparing';
-      byId('key-state').textContent = video.key_saved ? 'Key 已保存，实际转写时验证' : '尚未设置';
+      renderCapabilitySummary();
       byId('config-location').textContent = '连接配置位置：' + (state.workbuddy_config || '未获取');
       displayJobs(state.jobs || []);
       if (selectedJob) await refreshDetail();
@@ -164,13 +172,22 @@
     });
   }
 
-  function fillProfileSelect(select, value, isDefault = false) {
+  function fillProfileSelect(select, value, isDefault = false, capability = 'text') {
     select.replaceChildren();
-    const empty = node('option', isDefault ? '未指定默认连接' : '跟随默认连接'); empty.value = ''; select.append(empty);
-    (config.profiles || []).forEach(profile => {
-      const option = node('option', profile.name + ' · ' + profile.model_id); option.value = profile.id; select.append(option);
+    const empty = node('option', capability !== 'text' ? '未配置' : isDefault ? '未指定默认连接' : '跟随默认文字连接'); empty.value = ''; select.append(empty);
+    (config.profiles || []).filter(profile => capabilitiesOf(profile).includes(capability)).forEach(profile => {
+      const model = modelFor(profile, capability);
+      const option = node('option', profile.name + ' · ' + (model || '尚未填写型号')); option.value = profile.id; select.append(option);
     });
     select.value = value || '';
+  }
+  function renderCapabilitySummary() {
+    const routes = config && config.capability_profiles || {};
+    const labels = ['vision','asr'].map(capability => {
+      const profile = profileById(routes[capability]);
+      return capabilityNames[capability] + '：' + (profile ? profile.name : '未配置');
+    });
+    byId('key-state').textContent = labels.join(' · ') + '。在 AI 设置中统一管理。';
   }
   function renderModeSummary() {
     if (!config) return;
@@ -187,6 +204,7 @@
     document.querySelectorAll('[name="generation-mode"]').forEach(input => { input.checked = input.value === config.generation_mode; });
     fillProfileSelect(byId('default-profile'), config.default_profile, true);
     ['ingest', 'qa', 'correlation'].forEach(kind => fillProfileSelect(byId('profile-' + kind), (config.task_profiles || {})[kind]));
+    ['vision','asr'].forEach(capability => fillProfileSelect(byId('profile-' + capability), (config.capability_profiles || {})[capability], false, capability));
     byId('model-config-state').textContent = config.generation_mode === 'independent' ? '独立模型已启用' : '宿主模式已启用';
     byId('routing-state').textContent = '当前配置已保存';
     updateRoutingVisibility();
@@ -206,33 +224,50 @@
       const head = node('div', '', 'profile-heading');
       const info = node('div', '', 'profile-info');
       info.append(node('strong', profile.name));
-      info.append(node('p', ((providerById(profile.provider) || {}).name || profile.provider) + ' · ' + profile.model_id, 'profile-subtitle'));
+      const capabilities = capabilitiesOf(profile);
+      info.append(node('p', ((providerById(profile.provider) || {}).name || profile.provider) + ' · ' + capabilities.map(capability => capabilityNames[capability] + ' ' + (modelFor(profile, capability) || '未填型号')).join(' / '), 'profile-subtitle'));
       const tags = node('div', '', 'profile-tags');
       tags.append(badge('已保存'));
-      const tested = profile.tested_revision != null && profile.tested_revision === profile.revision && (profile.test_status === 'passed' || profile.test_status === 'succeeded' || profile.test_status === 'success');
-      tags.append(badge(tested ? '测试通过' : profile.test_status === 'failed' ? '测试失败' : profile.tested_revision != null ? '配置已变更，需重测' : '尚未测试', tested ? 'success' : profile.test_status === 'failed' ? 'error' : ''));
+      capabilities.forEach(capability => {
+        const test = capability === 'text' ? {status:profile.test_status,tested_revision:profile.tested_revision} : (profile.capability_test_status || {})[capability] || {};
+        const current = test.tested_revision != null && test.tested_revision === profile.revision;
+        const passed = current && ['passed','succeeded','success'].includes(test.status);
+        const failed = test.status === 'failed' && (test.tested_revision == null || current);
+        const label = passed ? '测试通过' : failed ? '测试失败' : test.tested_revision != null ? '配置已变更，需重测' : '尚未测试';
+        tags.append(badge(capabilityNames[capability] + ' · ' + label, passed ? 'success' : failed ? 'error' : ''));
+      });
       const activeRoles = [];
       if (config.generation_mode === 'independent') {
         if (config.default_profile === profile.id) activeRoles.push('默认');
         [['ingest','整理'],['qa','问答'],['correlation','关联']].forEach(([key,label]) => { if ((config.task_profiles || {})[key] === profile.id) activeRoles.push(label); });
       }
+      ['vision','asr'].forEach(capability => { if ((config.capability_profiles || {})[capability] === profile.id) activeRoles.push(capabilityNames[capability]); });
       tags.append(badge(activeRoles.length ? '已启用 · ' + activeRoles.join(' / ') : '未启用', activeRoles.length ? 'success' : ''));
       tags.append(badge(profile.credential_error ? '凭据库暂不可用' : profile.credential_present ? 'Key 已保存' : ['ollama','custom'].includes(profile.provider) && /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(?::|\/|$)/.test(profile.base_url) ? '本机免 Key' : '未配置 Key'));
       info.append(tags);
       const buttons = node('div', '', 'profile-buttons');
       const edit = node('button', '编辑'); edit.type='button'; edit.addEventListener('click', () => editProfile(profile.id));
-      const test = node('button', '测试'); test.type='button'; test.title='发送简短请求，可能产生 API 费用'; test.addEventListener('click', () => withButton(test, () => testProfile(profile.id)));
       const activate = node('button', '设为默认并启用'); activate.type='button'; activate.addEventListener('click', () => withButton(activate, async () => {
         applyConfig(await request('/api/models/save', {generation_mode:'independent',default_profile:profile.id}), true);
         message('已启用 ' + profile.name + '。新任务使用该默认连接；已有的任务覆盖配置继续生效。');
       }));
+      activate.disabled = !capabilities.includes('text') || !modelFor(profile, 'text');
+      activate.title = '设为默认文字生成连接；视觉和语音需分别选择';
       const remove = node('button', '删除', 'danger'); remove.type='button'; remove.addEventListener('click', () => withButton(remove, async () => {
         if (!confirm('删除连接“' + profile.name + '”？该连接保存的 Key 也会移除。已被默认或任务配置引用时，请先解除引用。')) return;
         applyConfig(await request('/api/models/delete', {profile_id:profile.id}), true);
         if (byId('profile-id').value === profile.id) newProfile();
         message('连接已删除。');
       }));
-      buttons.append(edit, test, activate, remove); head.append(info, buttons); item.append(head); holder.append(item);
+      buttons.append(edit);
+      capabilities.forEach(capability => {
+        const test = node('button', '测试' + capabilityNames[capability]); test.type='button';
+        test.title = testDescription(capability); test.disabled = !modelFor(profile, capability);
+        test.addEventListener('click', () => withButton(test, () => testProfile(profile.id, capability)));
+        buttons.append(test);
+      });
+      if (capabilities.includes('text')) buttons.append(activate);
+      buttons.append(remove); head.append(info, buttons); item.append(head); holder.append(item);
     });
   }
   function renderProviders() {
@@ -252,7 +287,7 @@
     config = value.config || value;
     configRefreshAt = Date.now();
     if (forceRouting) routingDirty = false;
-    renderModeSummary(); renderRouting(); renderProfiles(); renderProviders();
+    renderModeSummary(); renderCapabilitySummary(); renderRouting(); renderProfiles(); renderProviders(); renderSecretSources();
     if (!selectedProvider && (config.providers || []).length) selectProvider(config.providers[0].id, true);
     updateProfileButtons();
   }
@@ -264,7 +299,7 @@
     const provider = providerById(selectedProvider) || {};
     const modelId = byId('model-id').value.trim();
     const dynamic = provider.thinking_dynamic === true;
-    const supported = Boolean(modelId) && (dynamic || (provider.thinking_models || []).includes(modelId));
+    const supported = byId('capability-text').checked && Boolean(modelId) && (dynamic || (provider.thinking_models || []).includes(modelId));
     Array.from(byId('model-thinking').options).forEach(option => { option.disabled = option.value !== 'default' && !supported; });
     if (!supported) byId('model-thinking').value = 'default';
     byId('thinking-hint').textContent = dynamic ? '可选择思考模式；执行前会向本机 Ollama 查询模型能力，不支持时会明确提示。' : supported ? '此模型已支持显式思考开关；费用与响应速度由厂商和模型决定。' : '当前模型的思考开关尚未核验，使用服务商默认设置。';
@@ -278,6 +313,7 @@
       byId('model-url').value = provider.default_base_url || '';
       byId('model-id').value = provider.default_model || '';
       byId('model-thinking').value = 'default';
+      byId('audio-api-style').value = id === 'qwen' ? 'dashscope' : 'openai_audio';
     }
     byId('provider-hint').textContent = provider.hint || '请使用该服务商的模型 API 地址和对应凭据。';
     const regions = provider.regions || [];
@@ -288,7 +324,30 @@
       const custom=node('option','自定义地址');custom.value='';byId('provider-region').append(custom);
       byId('provider-region').value = regions.some(region => region.base_url === byId('model-url').value) ? byId('model-url').value : '';
     }
-    renderProviders(); updateThinking();
+    renderProviders(); updateCapabilities(); updateThinking();
+  }
+  function selectedCapabilities() {
+    return Object.keys(capabilityNames).filter(capability => byId('capability-' + capability).checked);
+  }
+  function updateCapabilities() {
+    const capabilities = selectedCapabilities();
+    byId('vision-model-field').hidden = !capabilities.includes('vision');
+    byId('asr-model-field').hidden = !capabilities.includes('asr');
+    byId('audio-api-style-field').hidden = !capabilities.includes('asr');
+    byId('model-id').disabled = !capabilities.includes('text');
+    const select = byId('test-capability');
+    const current = select.value;
+    select.replaceChildren();
+    capabilities.forEach(capability => { const option = node('option', capabilityNames[capability]); option.value = capability; select.append(option); });
+    if (capabilities.includes(current)) select.value = current;
+    updateProfileButtons();
+  }
+  function renderSecretSources() {
+    byId('secret-template-path').textContent = config.secret_template_path ? '空模板：' + config.secret_template_path : '模板位置尚未获取';
+    byId('secret-input-path').textContent = config.secret_input_path ? '填写文件：' + config.secret_input_path : '填写文件位置尚未获取';
+  }
+  function testDescription(capability) {
+    return {text:'发送简短文字请求，可能产生 API 费用',vision:'发送合成图片，可能产生 API 费用；不代表真实画面理解质量',asr:'发送静音 WAV，可能产生 API 费用；不代表真实转写质量'}[capability] || '请先选择要测试的能力';
   }
   function markProfileDirty() {
     profileDirty = true;
@@ -297,9 +356,15 @@
   }
   function updateProfileButtons() {
     const saved = !!byId('profile-id').value;
-    byId('test-profile').disabled = !saved || profileDirty || !byId('model-id').value.trim();
+    const capability = byId('test-capability').value;
+    const modelInput = {text:'model-id',vision:'vision-model-id',asr:'asr-model-id'}[capability];
+    byId('test-profile').disabled = !saved || profileDirty || !modelInput || !byId(modelInput).value.trim();
     byId('list-models').disabled = !saved || profileDirty;
-    byId('test-profile').title = profileDirty ? '请先保存修改' : '发送简短请求，可能产生 API 费用';
+    byId('test-profile').title = profileDirty ? '请先保存修改' : testDescription(capability);
+    byId('test-profile').textContent = '测试已保存' + (capabilityNames[capability] || '') + '能力';
+    byId('import-template-key').disabled = !saved || profileDirty;
+    byId('import-legacy-key').disabled = !saved || profileDirty || selectedProvider !== 'qwen' || !(config && config.legacy_secret_present);
+    byId('secret-import-hint').textContent = !saved ? '请先保存并选择一个连接。成功写入系统凭据库并回读校验后，清空来源密钥字段；失败保留原值。' : profileDirty ? '请先保存或取消修改，再导入到当前连接。' : '导入目标：' + ((profileById(byId('profile-id').value) || {}).name || '当前连接') + '。成功写入系统凭据库并回读校验后，清空原文件密钥字段，保留其他内容；失败保留原值。旧 DashScope Key 仅可迁移到 Qwen 连接。';
   }
   function newProfile(providerId) {
     byId('profile-form').reset(); byId('profile-id').value = '';
@@ -317,6 +382,10 @@
     byId('profile-id').value = profile.id;
     byId('profile-name').value = profile.name;
     byId('model-id').value = profile.model_id;
+    Object.keys(capabilityNames).forEach(capability => { byId('capability-' + capability).checked = capabilitiesOf(profile).includes(capability); });
+    byId('vision-model-id').value = modelFor(profile, 'vision');
+    byId('asr-model-id').value = modelFor(profile, 'asr');
+    byId('audio-api-style').value = profile.audio_api_style || 'dashscope';
     byId('model-url').value = profile.base_url;
     byId('model-timeout').value = profile.timeout_seconds;
     byId('model-max-tokens').value = profile.max_output_tokens;
@@ -331,16 +400,27 @@
     byId('model-thinking').value = profile.thinking || 'default'; updateThinking(); updateProfileButtons();
     byId('profile-editor').scrollIntoView({block:'start',behavior:'smooth'});
   }
-  async function testProfile(profileId) {
+  async function testProfile(profileId, capability = 'text') {
     const profile = profileById(profileId);
     if (!profile) throw new Error('请先保存模型连接。');
-    const result = await request('/api/models/test', {profile_id:profileId});
+    if (!capabilitiesOf(profile).includes(capability) || !modelFor(profile, capability)) throw new Error('请先为此连接保存对应能力与型号。');
+    const result = await request('/api/models/test', {profile_id:profileId,capability});
     if (result.job_id) {
       testingJobs.add(result.job_id);
-      message('正在测试“' + profile.name + '”，测试会产生少量 API 用量。结果可在后台任务中查看。');
+      message('正在测试“' + profile.name + '”的' + capabilityNames[capability] + '能力。' + testDescription(capability) + '。结果可在后台任务中查看。');
       await selectJob(result.job_id);
     } else message('连接测试已提交。');
     await refresh();
+  }
+  async function importSecret(source) {
+    const profileId = byId('profile-id').value;
+    const profile = profileById(profileId);
+    if (!profile || profileDirty) throw new Error('请先保存并选择目标连接。');
+    if (source === 'legacy' && profile.provider !== 'qwen') throw new Error('旧 DashScope Key 只可导入 Qwen 连接。');
+    if (!confirm('将本机文件中的 Key 导入“' + profile.name + '”' + (profile.credential_present ? '并替换此连接当前保存的 Key' : '') + '？系统凭据库写入并回读校验成功后，会清空原文件的密钥字段并保留其他内容；失败时保留原值。')) return;
+    await request('/api/models/import-secret', {profile_id:profileId,source});
+    await loadModels(false); editProfile(profileId);
+    message('Key 已导入“' + profile.name + '”。原文件的密钥字段已清空，其他内容保留；请分别测试需要的能力。');
   }
 
   function clearResult() {
@@ -349,6 +429,7 @@
     byId('detail-meta').replaceChildren();
     byId('detail-references').replaceChildren(); byId('detail-references').hidden = true;
     byId('detail-metrics').replaceChildren(); byId('detail-metrics').hidden = true;
+    byId('detail-media').replaceChildren(); byId('detail-media').hidden = true;
     byId('copy-result').hidden = true; byId('detail-stream-hint').hidden = true;
   }
   function renderJobHeader(job) {
@@ -393,6 +474,35 @@
     const list = node('dl'); entries.forEach(([label,value]) => list.append(node('dt',label),node('dd',value)));
     holder.append(list);holder.hidden=false;
   }
+  function renderMedia(media, saved) {
+    if (!media || typeof media !== 'object') return;
+    const frames = Array.isArray(media.frames) ? media.frames : [];
+    const precision = Array.isArray(media.timeline_precision) ? media.timeline_precision : media.timeline_precision ? [media.timeline_precision] : [];
+    const holder = byId('detail-media');
+    holder.replaceChildren(node('h3','视频画面与时间定位'));
+    const labels = {subtitle:'字幕时间',chunk:'分块转写时间（近似）',approximate:'近似时间'};
+    const precisionText = [...new Set(precision.map(value => labels[value] || '时间精度未标注'))].join('、');
+    holder.append(node('p', precisionText ? '讲解定位依据：' + precisionText + '。' : '讲解时间精度未标注；请结合原视频核对。', 'footnote'));
+    if (precision.includes('chunk') || precision.includes('approximate')) holder.append(node('p','分块时间用于寻找附近讲解，不是逐句精确时间戳。','footnote'));
+    if (media.sampling) {
+      const sampling = typeof media.sampling === 'string' ? media.sampling : media.sampling.method || media.sampling.mode || '';
+      const samplingLabels = {manual:'手动时间点',uniform:'有限均匀采样',uniform_nearby:'有限自动采样',automatic:'有限自动采样',auto:'有限自动采样'};
+      holder.append(node('p', '画面选择：' + (samplingLabels[sampling] || '有限采样') + '，不保证覆盖视频的全部重点。', 'footnote'));
+    }
+    if (frames.length) {
+      const list = node('ul');
+      frames.forEach((frame, index) => {
+        if (!frame || typeof frame !== 'object') return;
+        const time = typeof frame.time === 'number' && Number.isFinite(frame.time) ? Number(frame.time.toFixed(2)) + ' 秒' : '时间未标注';
+        const item = node('li');
+        item.append(node('strong', (frame.id || '画面 ' + (index + 1)) + ' · ' + time));
+        if (typeof frame.relative_path === 'string') item.append(node('code', frame.relative_path));
+        list.append(item);
+      });
+      holder.append(list, node('p', (saved ? '附件路径相对于笔记库；可在 Obsidian 中打开笔记和画面。' : '以上为计划保存位置；宿主完成正文并保存后，可在 Obsidian 中查看笔记和画面。') + '画面解读结合前后约 30 秒讲解，请审核其中的层级、箭头与推断。','footnote'));
+    } else holder.append(node('p','本次结果没有返回画面附件。','footnote'));
+    holder.hidden = false;
+  }
   function renderResult(job) {
     const signature = JSON.stringify(job);
     if (detailSignature === signature) return;
@@ -419,6 +529,8 @@
     if (result.generation_mode === 'independent') metadata.append(badge('独立模型'));
     if (result.status === 'staged') {
       metadata.append(badge('待审核草稿','success'));
+      byId('detail-state').textContent = '待审核草稿';
+      byId('detail-state').className = 'badge success';
       byId('detail-progress').textContent = '笔记已保存为待审核草稿。请在 Obsidian 中审核后再收录。';
     }
     if (result.note_path || result.absolute_path || result.path) metadata.append(badge('保存位置：' + (result.absolute_path || result.note_path || result.path)));
@@ -435,7 +547,7 @@
     }
     if (!text && result.status === 'no_hits') text = '没有找到可用的笔记片段。请确认已建立索引、笔记已审核，且问题处于授权检索范围内。';
     if (!text && result.message) text = typeof result.message === 'string' ? result.message : '';
-    if (!text && ['model_test','test_model','test_connection'].includes(job.kind)) text = result.ok === false ? '连接测试未通过，请检查错误说明。' : '连接测试已完成，已收到模型服务响应。';
+    if (!text && ['model_test','test_model','test_connection'].includes(job.kind)) text = result.ok === false ? '连接测试未通过，请检查错误说明。' : (capabilityNames[result.capability] || '所选') + '能力接口测试已完成，已收到服务响应；不代表其他能力可用或真实内容质量。';
     if (!text && ['index_vault','index'].includes(job.kind)) {
       text = '索引任务已完成。原笔记保持不变。';
       if (typeof result.notes === 'number') text += '\n收录笔记：' + result.notes;
@@ -459,6 +571,7 @@
       if (seen.size) { holder.append(list);holder.hidden=false; }
     }
     renderMetrics(result);
+    renderMedia(result.media, result.status === 'staged');
   }
   async function refreshDetail() {
     const jobId = selectedJob;
@@ -538,13 +651,27 @@
     await refresh();
   }
   function lines(value) {return value.split(/\r?\n/).map(line=>line.trim()).filter(Boolean);}
+  function frameTimes() {
+    const value = byId('frame-times').value.trim();
+    if (!value) return [];
+    const parts = value.split(/[,，]/).map(part => part.trim());
+    if (parts.length > 8) throw new Error('最多指定 8 个画面时间点。');
+    if (parts.some(part => !/^\d+(?:\.\d+)?$/.test(part) || !Number.isFinite(Number(part)))) throw new Error('画面时间请填写非负秒数，用逗号分隔，例如 90, 125.5, 240。');
+    return parts.map(Number);
+  }
+  function updateVideoMode() {
+    const mode = document.querySelector('[name="video-mode"]:checked');
+    byId('frame-times-field').hidden = !mode || mode.value !== 'illustrated';
+  }
   function updateTaskForm() {
     const kind=byId('task-kind').value;
     byId('task-folder-field').hidden=kind!=='ingest';
     byId('task-input-field').hidden=!['ingest','query'].includes(kind);
     byId('task-input').required=['ingest','query'].includes(kind);
-    byId('task-input-label').textContent=kind==='query'?'想向知识库提出的问题':'想整理的原文或想法';
-    byId('task-input').placeholder=kind==='query'?'例如：我的笔记中，RAG 检索质量有哪些优化方法？':'粘贴一段文字，让零散的记录成为有结构的笔记。';
+    byId('task-input-label').textContent=kind==='query'?'想向知识库提出的问题':'想整理的原文、想法或视频链接';
+    byId('task-input').placeholder=kind==='query'?'例如：我的笔记中，RAG 检索质量有哪些优化方法？':'粘贴文字或视频链接，并说明希望理解和保存的内容。';
+    byId('task-video-fields').hidden=kind!=='ingest';
+    updateVideoMode();
     byId('task-note-field').hidden=kind!=='correlation';byId('task-note').required=kind==='correlation';
     byId('task-query-folder-field').hidden=kind!=='query';
     byId('task-index-fields').hidden=kind!=='index';byId('index-authorize').required=kind==='index';
@@ -554,17 +681,13 @@
 
   document.querySelectorAll('[data-page]').forEach(button=>button.addEventListener('click',()=>showPage(button.dataset.page)));
   document.querySelector('.brand').addEventListener('click',event=>{event.preventDefault();showPage('home');});
-  ['open-settings','hero-settings','edit-generation'].forEach(id=>byId(id).addEventListener('click',()=>showPage('settings')));
+  ['open-settings','hero-settings','edit-generation','video-settings'].forEach(id=>byId(id).addEventListener('click',()=>showPage('settings')));
   byId('start-task').addEventListener('click',()=>showPage('tasks'));
   byId('theme-toggle').addEventListener('click',()=>setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark'));
   byId('register').addEventListener('click',()=>action('/api/register',{},byId('register')));
   byId('refresh').addEventListener('click',()=>withButton(byId('refresh'),refresh));
   byId('prepare-semantic').addEventListener('click',()=>action('/api/prepare',{feature:'semantic'},byId('prepare-semantic')));
   byId('prepare-video').addEventListener('click',()=>action('/api/prepare',{feature:'video'},byId('prepare-video')));
-  byId('key-form').addEventListener('submit',async event=>{
-    event.preventDefault();const value=byId('api-key').value;byId('api-key').value='';
-    await action('/api/key',{key:value},event.submitter);
-  });
   byId('routing-form').addEventListener('change',()=>{routingDirty=true;byId('routing-state').textContent='有未应用的修改';updateRoutingVisibility();});
   byId('routing-form').addEventListener('submit',event=>{
     event.preventDefault();withButton(byId('save-routing'),async()=>{
@@ -572,15 +695,16 @@
       if (!mode) throw new Error('请先等待模型配置加载完成。');
       const defaultProfile=byId('default-profile').value || null;
       const taskProfiles={};['ingest','qa','correlation'].forEach(key=>{taskProfiles[key]=byId('profile-'+key).value || null;});
+      const capabilityProfiles={};['vision','asr'].forEach(key=>{capabilityProfiles[key]=byId('profile-'+key).value || null;});
       if (mode.value==='independent' && !defaultProfile && Object.values(taskProfiles).some(value=>!value)) throw new Error('请选择默认模型连接，或为三种任务分别指定连接。');
-      applyConfig(await request('/api/models/save',{generation_mode:mode.value,default_profile:defaultProfile,task_profiles:taskProfiles}),true);
+      applyConfig(await request('/api/models/save',{generation_mode:mode.value,default_profile:defaultProfile,task_profiles:taskProfiles,capability_profiles:capabilityProfiles}),true);
       message('生成配置已保存并应用，只影响之后开始的新任务。');
     });
   });
   byId('new-profile').addEventListener('click',()=>{if(!config)return;newProfile();byId('profile-editor').scrollIntoView({block:'start',behavior:'smooth'});byId('profile-name').focus({preventScroll:true});});
   byId('cancel-edit').addEventListener('click',()=>newProfile());
-  byId('profile-form').addEventListener('input',()=>{markProfileDirty();updateThinking();});
-  byId('profile-form').addEventListener('change',()=>{markProfileDirty();updateThinking();});
+  byId('profile-form').addEventListener('input',event=>{if(event.target.id==='test-capability')return;markProfileDirty();updateCapabilities();updateThinking();});
+  byId('profile-form').addEventListener('change',event=>{if(event.target.id==='test-capability')return;markProfileDirty();updateCapabilities();updateThinking();});
   byId('provider-region').addEventListener('change',()=>{if(byId('provider-region').value)byId('model-url').value=byId('provider-region').value;});
   byId('model-url').addEventListener('input',()=>{const provider=providerById(selectedProvider)||{};byId('provider-region').value=(provider.regions||[]).some(region=>region.base_url===byId('model-url').value)?byId('model-url').value:'';});
   byId('profile-form').addEventListener('submit',event=>{
@@ -588,6 +712,11 @@
       if (!selectedProvider) throw new Error('请先选择模型服务商。');
       const existingId=byId('profile-id').value;
       const profile={name:byId('profile-name').value.trim(),provider:selectedProvider,base_url:byId('model-url').value.trim(),model_id:byId('model-id').value.trim(),timeout_seconds:Number(byId('model-timeout').value),max_output_tokens:Number(byId('model-max-tokens').value),thinking:byId('model-thinking').value};
+      profile.capabilities = selectedCapabilities();
+      if (!profile.capabilities.length) throw new Error('请至少选择一项连接能力。');
+      profile.capability_models = {vision:byId('vision-model-id').value.trim(),asr:byId('asr-model-id').value.trim()};
+      profile.audio_api_style = byId('audio-api-style').value;
+      if (!profile.capabilities.includes('text')) profile.model_id = '';
       if (existingId) profile.id=existingId;
       if (byId('model-key').value) profile.api_key=byId('model-key').value;
       if (byId('clear-model-key').checked) profile.clear_key=true;
@@ -600,7 +729,10 @@
       message('模型连接已保存。可以测试连接，再选择是否启用。');
     });
   });
-  byId('test-profile').addEventListener('click',()=>withButton(byId('test-profile'),()=>testProfile(byId('profile-id').value)));
+  byId('test-capability').addEventListener('change',updateProfileButtons);
+  byId('test-profile').addEventListener('click',()=>withButton(byId('test-profile'),()=>testProfile(byId('profile-id').value,byId('test-capability').value)));
+  byId('import-template-key').addEventListener('click',()=>withButton(byId('import-template-key'),()=>importSecret('template')));
+  byId('import-legacy-key').addEventListener('click',()=>withButton(byId('import-legacy-key'),()=>importSecret('legacy')));
   byId('list-models').addEventListener('click',()=>withButton(byId('list-models'),async()=>{
     const result=await request('/api/models/list',{profile_id:byId('profile-id').value});
     const list=byId('model-options');list.replaceChildren();
@@ -609,11 +741,16 @@
     byId('model-id').focus();
   }));
   byId('task-kind').addEventListener('change',updateTaskForm);
+  document.querySelectorAll('[name="video-mode"]').forEach(input=>input.addEventListener('change',updateVideoMode));
   byId('task-form').addEventListener('submit',event=>{
     event.preventDefault();withButton(byId('submit-task'),async()=>{
       const kind=byId('task-kind').value;
       const data={kind,vault_path:byId('task-vault').value.trim()};
-      if (kind==='ingest') {data.user_input=byId('task-input').value.trim();data.folder=byId('task-folder').value.trim();}
+      if (kind==='ingest') {
+        data.user_input=byId('task-input').value.trim();data.folder=byId('task-folder').value.trim();
+        data.video_mode=document.querySelector('[name="video-mode"]:checked').value;
+        if(data.video_mode==='illustrated') data.frame_times=frameTimes();
+      }
       else if (kind==='query') {data.question=byId('task-input').value.trim();data.folders=lines(byId('task-query-folders').value);}
       else if (kind==='correlation') data.note_path=byId('task-note').value.trim();
       else {

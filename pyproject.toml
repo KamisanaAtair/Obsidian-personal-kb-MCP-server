@@ -1,6 +1,6 @@
 [project]
 name = "personal-kb-multiagent"
-version = "0.4.0b3"
+version = "0.5.0b1"
 description = "本机个人知识库：可配置独立模型、本地检索、草稿审核与 MCP 客户端集成"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -58,6 +58,7 @@ video = ["yt-dlp==2026.8.19", "imageio-ffmpeg==0.6.0"]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
+    "markdown-it-py>=3.0.0",  # 验证图片引用不会被 Markdown 代码块或 HTML 隐藏
     "langgraph-cli[inmem]>=0.1.50",  # 提供 langgraph dev 本地调试服务
     "ruff>=0.5.0",
 ]

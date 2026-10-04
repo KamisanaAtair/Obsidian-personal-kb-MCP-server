@@ -27,6 +27,11 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
 
+if __package__:
+    from .build_installer import build
+else:
+    from build_installer import build
+
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_TOOLS = {
     "get_status",
@@ -121,7 +126,9 @@ def extract(archive: Path, destination: Path) -> None:
         zipped.extractall(destination)
 
 
-def prepare_source(case: str, work: Path, release: dict, revision: str) -> Path:
+def prepare_source(
+    case: str, work: Path, release: dict, revision: str, *, artifact_info: dict | None = None
+) -> Path:
     if case == "checkout":
         source = work / "源码 检出"
         run(
@@ -146,7 +153,16 @@ def prepare_source(case: str, work: Path, release: dict, revision: str) -> Path:
         extract(archive, source)
         return source
     name = f"PersonalKB-{release['version']}-windows-x64.zip"
-    archive = ROOT / "preview-releases" / release["version"] / name
+    release_directory = ROOT / "preview-releases" / release["version"]
+    artifact_source = "existing_release"
+    # An existing but incomplete release must fail its integrity checks. Only a
+    # wholly absent version gets a temporary candidate built from this revision.
+    if not os.path.lexists(release_directory):
+        candidate_source = prepare_source("source-zip", work, release, revision)
+        release_directory = work / "候选平台包"
+        build(root=candidate_source, output=release_directory, platforms=("windows-x64",))
+        artifact_source = "source_build"
+    archive = release_directory / name
     checksum = archive.with_name(name + ".sha256").read_text(encoding="ascii").split()
     require(
         len(checksum) == 2 and checksum[1] == name,
@@ -167,6 +183,14 @@ def prepare_source(case: str, work: Path, release: dict, revision: str) -> Path:
     extract(archive, destination)
     source = destination / archive.stem
     require(source.is_dir(), "Platform ZIP root directory is missing")
+    if artifact_info is not None:
+        artifact_info.update(
+            source=artifact_source,
+            version=release["version"],
+            file=name,
+            sha256=checksum[0],
+            bytes=archive.stat().st_size,
+        )
     return source
 
 
@@ -382,7 +406,10 @@ def smoke(case: str) -> int:
     phase = "source"
     port = 0
     try:
-        source = prepare_source(case, work, release, revision)
+        artifact_info = {}
+        source = prepare_source(case, work, release, revision, artifact_info=artifact_info)
+        if artifact_info:
+            summary["platform_zip"] = artifact_info
         require(
             read_json(source / "installer" / "release.json") == release,
             "Source release manifest differs from the checked-out release",

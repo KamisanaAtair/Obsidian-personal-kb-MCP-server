@@ -24,6 +24,7 @@ DOC_FILES = (
     "docs/workbuddy.md",
     "docs/HOST_USAGE.md",
     "docs/LEGACY_STDIO.md",
+    "docs/video-notes.md",
     "personal-kb-mcp-setup/SKILL.md",
 )
 REQUIRED_FILES = (

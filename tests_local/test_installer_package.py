@@ -50,6 +50,7 @@ def source(tmp_path: Path) -> Path:
         "docs/workbuddy.md",
         "docs/HOST_USAGE.md",
         "docs/LEGACY_STDIO.md",
+        "docs/video-notes.md",
         "personal-kb-mcp-setup/SKILL.md",
     ):
         put(root, relative, b"Synthetic package test fixture; no real credentials.\n")

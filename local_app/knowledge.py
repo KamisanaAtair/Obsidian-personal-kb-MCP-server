@@ -116,6 +116,35 @@ class KnowledgeBase:
             session["generation_mode"] = "independent"
             atomic_json(path, session)
 
+    def bind_media(self, prepare_id, bundle, media_root):
+        from .media_assets import manifest_for, public_media
+
+        manifest = manifest_for(prepare_id, bundle, media_root)
+        with self._lock:
+            path = self.sessions / f"{prepare_id}.json"
+            session = read_json(path)
+            if not session:
+                raise ValueError("笔记任务不存在")
+            if session.get("media_manifest") and session["media_manifest"] != manifest:
+                raise ValueError("该任务的截图清单已变化，请重新准备")
+            session["media_manifest"] = manifest
+            session["media"] = public_media(manifest, bundle)
+            atomic_json(path, session)
+            return session["media"]
+
+    def validate_media_body(self, prepare_id, body):
+        if not isinstance(prepare_id, str) or len(prepare_id) != 32 or any(
+            c not in "0123456789abcdef" for c in prepare_id
+        ):
+            raise ValueError("笔记任务不存在")
+        with self._lock:
+            session = read_json(self.sessions / f"{prepare_id}.json")
+            if not session or not session.get("media_manifest"):
+                raise ValueError("图文笔记任务不存在")
+            from .media_assets import render_frames
+
+            render_frames(body, session["media_manifest"])
+
     def finalize(self, prepare_id: str, note_content: str, *, independent: bool = False) -> dict:
         if (
             not isinstance(prepare_id, str)
@@ -152,6 +181,11 @@ class KnowledgeBase:
             settings = Settings(
                 _env_file=None, note_status_field="status", vault_autodiscover=False
             )
+            if session.get("media_manifest"):
+                from .media_assets import publish, render_frames
+
+                note_content = render_frames(note_content, session["media_manifest"])
+                publish(root, session["media_manifest"])
             rendered = _force_status_staged(
                 _ensure_frontmatter(
                     note_content,
@@ -213,6 +247,7 @@ class KnowledgeBase:
                 "absolute_path": str(destination),
                 "vault_id": session["vault_id"],
                 "status": "staged",
+                **({"media": session["media"]} if session.get("media") else {}),
                 **({"note_content": session["rendered_content"]} if independent else {}),
             }
 

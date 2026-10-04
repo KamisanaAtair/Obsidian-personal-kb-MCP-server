@@ -1,58 +1,83 @@
-# 本机安装与恢复（0.4.0b3）
+# 本机安装与恢复（0.5.0b1）
 
-[用户步骤](../README-FIRST.md) · [当前验证进度](https://github.com/KamisanaAtair/Obsidian-personal-kb-MCP-server/blob/codex/local-installer-preview/project-memory/reports/2026-10-03-model-settings-development.md)
+[用户步骤](../README-FIRST.md) · [图文视频与 AI 设置](video-notes.md) · [当前验证范围](../README.md#验证范围与试用边界)
 
-使用 `preview-releases/0.4.0b3/PersonalKB-0.4.0b3-{macos-arm64,windows-x64}.zip` 中对应平台的安装包，完整解压后双击启动入口。无需复制 Skill 文件夹或向 WorkBuddy 发送两轮安装指令。0.3.0b1 历史包原样保留，不会自动获得新的模型设置功能。
+当前功能位于 **[`codex/local-installer-preview` 分支](https://github.com/KamisanaAtair/Obsidian-personal-kb-MCP-server/tree/codex/local-installer-preview)**。本轮更新源码，不上传新的 0.5 平台安装包；默认 ASR 分支及历史 0.4.0b3 ZIP 不能作为 0.5 功能入口。无需复制 Skill 文件夹或向 WorkBuddy 发送两轮安装指令。
+
+## 选择正确的入口
+
+| 取得的内容 | Windows x64 | macOS 14+ Apple 芯片 |
+|---|---|---|
+| 当前 `codex/local-installer-preview` 完整克隆或源码 ZIP | 已含 Windows uv；完整目录中运行 `install.cmd` | 不含 Mac uv；按 [README 开发运行步骤](../README.md#开发与打包)启动，不能直接双击源码 `install.command` |
+| 本地构建的完整 0.5 平台候选包 | 完整解压后运行 `install.cmd` | 完整解压后运行 `install.command`；须确有 Mac uv 和匹配的校验信息，当前无远端新包下载入口 |
+| 仓库保留的 0.4.0b3 平台 ZIP | 可按旧包指引安装，功能停留在 0.4 | 可按旧包指引安装，功能停留在 0.4 |
+
+Windows 推荐直接下载 **[当前分支源码 ZIP](https://github.com/KamisanaAtair/Obsidian-personal-kb-MCP-server/archive/refs/heads/codex/local-installer-preview.zip)**，点击“全部解压”后进入项目根目录。必须保持 `install.cmd`、`installer/bootstrap.py`、`installer/vendor/windows-x64/uv.exe` 的相对位置。克隆时显式指定分支：
+
+```bash
+git clone --branch codex/local-installer-preview --single-branch https://github.com/KamisanaAtair/Obsidian-personal-kb-MCP-server.git
+```
+
+安装器首次联网准备私有 Python 和基础依赖，无需预装 Python。源码 ZIP 也无需 Git。Mac 开发运行则需预先安装 `uv`，使用独立虚拟环境与数据目录；没有 Intel Mac 平台安装包。
 
 ## 会看到的界面
 
-1. 终端准备私有 Python 和基础依赖。首次需联网，失败后可重开并复用缓存。
-2. 浏览器打开工作台。右上角“设置”管理模型服务，主题按钮在黑紫与白紫之间切换；页脚从正在运行的服务读取版本。
-3. 默认采用宿主模式；要独立生成，在设置中添加连接，测试后选择默认或任务模型并保存应用。本地模型无需云端 Key；云端模型使用自己的 API Key。
-4. 可直接通过“本地任务”使用独立生成。要接入 WorkBuddy，点击“接入 WorkBuddy”，再在其原生界面完成首次信任。
-5. WorkBuddy 未出现连接器时刷新或重启客户端。配置保存、原生信任、客户端握手、真实笔记业务分别验证，不能互相代替。
+1. 安装器终端准备运行环境，首次需要联网；失败后可重开并复用缓存。
+2. 浏览器打开工作台，页脚应为 **0.5.0b1**。右上角 **“设置”** 或导航 **“AI 设置”** 管理模型服务，主题按钮切换黑紫 / 白紫。
+3. 默认采用宿主模式；独立生成需添加连接、填写文字型号、测试并选择默认或任务路由，再保存应用。视觉 / ASR 分别填写型号、分别测试和选择路由，不会跟随默认文字模型。同一连接各能力共用 Key，本机免 Key 服务可留空。
+4. 可直接从 **“本地任务”** 使用独立生成。接入 WorkBuddy 时点击工作台 **“接入 WorkBuddy”**，再在客户端完成首次原生信任；未出现连接器时刷新或重启客户端。
+5. 视频先准备组件；字幕优先，缺字幕才调用 ASR。图文模式另需视觉连接，每图结合前后约 30 秒讲解，自动或手选最多 8 图，视频限 512 MiB / 2 小时。图片作为 Obsidian 库内相对附件保存，笔记保持 `staged`。
 
-安装时不选择笔记库；每次任务明确指定现有库绝对路径。索引是单独授权的任务，本地表单要求勾选授权并说明目录范围。
+安装时不选择笔记库；每次任务明确指定现有库绝对路径。索引是单独授权的任务，表单要求勾选授权并说明目录范围。“配置保存”“客户端握手”“原生信任”“真实笔记完成”分别验证，不能互相代替。宿主模式的“资料已准备”尚不是最终保存。
 
 ## 稳定路径与凭据
 
-Windows：`%LOCALAPPDATA%\PersonalKB`。Mac：`~/Library/Application Support/PersonalKB`。
+安装器根目录：Windows `%LOCALAPPDATA%\PersonalKB`；Mac `~/Library/Application Support/PersonalKB`。开发运行的数据根目录由 `--data-dir` 决定，不会自动创建下表中的安装器运行时或快捷入口。
 
 | 路径或存储 | 用途 |
 |---|---|
-| `versions/` | 隔离的基础运行时与应用副本 |
-| `data/model-config.json` | 模型连接、路由、版本与系统凭据引用，不保存生成模型 Key 字面值 |
-| 系统凭据库 | 经 `keyring` 保存生成模型 Key；不可用时失败，不退回明文 |
-| `data/credentials.json` | 旧视频 ASR 的 DashScope Key，当前仍是本地 JSON，尚未迁移 |
-| `data/` 其他内容 | 持久任务、生成检查点、prepare 会话、模型缓存、每库索引等 |
-| `cache/uv` | 依赖下载缓存 |
-| `Open Personal KB.cmd` / `.command` | 持久启动入口，删除解压目录后也可使用 |
-| `logs/service.log` | 启动诊断；反馈前检查是否含个人资料 |
+| `versions/` | 安装器隔离的基础运行时与应用副本 |
+| `data/model-config.json` | 模型连接、文字 / 视觉 / ASR 路由、版本与系统凭据引用，不保存 Key 字面值 |
+| 系统凭据库 | 经 `keyring` 统一保存 0.5 本机服务的文字、视觉和 ASR Key；不可用时失败，不退回明文 |
+| `data/secrets.env.example` | 启动自动创建的空模板；已有模板不会覆盖 |
+| `data/secrets.env` | 用户自行填写的导入源；选中已保存连接后在页面显式导入，不自动读取启用 |
+| `data/credentials.json` | 旧版 DashScope 字段仅作为显式迁移来源；未迁移时原值仍在，不会自动用于新 ASR 路由 |
+| `data/` 其他内容 | 持久任务、生成 / 媒体检查点、prepare 会话、模型缓存、每库索引等 |
+| `cache/uv` | 安装器依赖下载缓存 |
+| `Open Personal KB.cmd` / `.command` | 安装器创建的持久启动入口，删除解压目录后仍可使用 |
+| `logs/service.log` | 安装器启动诊断；反馈前检查是否含个人资料 |
 
-任务原文、生成结果与笔记索引可能含私人内容，不应将整个安装数据目录上传作为排障材料。页面、MCP 和生成服务凭据分开；管理页通过启动入口获得自己的会话凭据。
+在 AI 设置选中目标连接，直接填写 Key 或展开“从本机 secret 文件导入 Key”。复制空模板为 `secrets.env` 并填写一个 `API_KEY` 字段后点击导入；旧 DashScope 字段只能在 Qwen 连接中迁移。成功写入系统凭据库并回读校验后才清空来源密钥字段，保留其他内容；失败保留原值。导入可能替换目标连接已有 Key，页面会明确确认；导入后仍需测试并保存所需路由。
+
+页面不会回填 Key；实际调用会向所选服务发送 Key 用于认证，并按任务发送文字、截图或音频。旧 stdio 仍使用自己的配置体系。任务原文、结果、媒体和索引可能含私人内容，不要上传整个安装数据目录作排障材料。页面会话、MCP 访问和模型服务凭据分开，管理页应通过启动入口打开。
 
 ## 重开、失败和升级
 
-此版没有开机自启。重复启动会识别当前服务，不会杀死占用端口的未知进程。默认端口 `32123`；有冲突时关闭已知旧服务，或从本机终端用 `--port 32124` 启动后重新点击接入。
+此版没有开机自启。安装器重复启动会识别当前服务，不会杀死占用端口的未知进程。默认端口 `32123`；升级前先在旧页面停止已知旧服务，再从新目录启动并核对页脚版本。需要改端口时，可从终端向安装入口或开发服务传入 `--port 32124`，之后重新点击接入 WorkBuddy。
 
-基础阶段失败可重开入口；可选功能失败在后台任务点继续 / 重试，复用下载缓存与已校验文件。退出或关机中断的任务标记为已中断，由用户选择恢复。
+基础阶段失败可重开入口；可选功能失败在后台任务点继续 / 重试，复用下载缓存与已校验文件。退出或关机中断的任务标记为已中断，由用户选择恢复。更换应用副本会重新验证可选功能；模型缓存保留，必要时再次点准备。任务共用队列，视频、模型或索引准备可能需要排队。
 
-模型请求不自动重试。手动重试保留任务原模型快照；有已保存的生成检查点时继续保存，不重新生成相同内容。没有完成检查点时可能再次产生模型调用和费用。修改配置后要使用新模型，应发起新任务。
+模型请求不自动重试。手动重试固定原任务模型快照，复用已完成的转写、抽帧、逐图理解及正文检查点，继续剩余步骤；未完成的模型步骤可能再次计费。不会覆盖用户改动的笔记或附件。修改设置后想换用新模型，应新建任务。宿主正文图片占位符不完整或被代码 / HTML 包住时，保存会拒绝，需修正正文再提交。
 
-升级使用新版本包，先停止已知旧服务，再启动新入口并核对页脚版本。新的应用副本会重新验证可选功能，模型缓存保留；必要时再次点准备。准备过程中基础文字仍可用，模型、索引和视频后台任务可能因共用队列而排队。
+遇到系统凭据库不可用，先在系统中解锁或恢复授权，再重试；程序不会通过明文文件绕过。更换云端域名 / 地域时需重新填写匹配 Key，或明确移除旧 Key。
 
-遇到系统凭据库不可用，先在系统中解锁或恢复授权，再重试保存 Key；程序不会通过本地明文文件绕过。更换云端服务域名 / 地域时，需重新填写匹配的 Key，或明确移除旧 Key。
+`mcp.json` 格式错误、同名非本安装器管理条目或链接路径会拒绝写入。不要用空文件覆盖既有配置，程序只维护自身条目，不改客户端信任记录。
 
-`mcp.json` 格式错误、同名非本安装器管理条目或链接路径会拒绝写入。不要用空文件覆盖既有配置，程序只维护自身条目，不改信任记录。
+可用环境变量 `PERSONAL_KB_INDEX_URL` 指定可信 Python 包源，依赖 SHA256 校验保持启用。默认使用 PyPI；语义模型尝试 ModelScope 固定版本，再尝试 Hugging Face 固定版本。包源设置不改变模型服务地址。
 
-可用本机环境变量 `PERSONAL_KB_INDEX_URL` 指定可信 Python 包源，依赖 SHA256 校验保持启用。默认使用 PyPI；语义模型尝试 ModelScope 固定版本，再尝试 Hugging Face 固定版本。这个包源设置不改变生成模型服务地址。
+## Windows 文件缺失或按键后退出
 
-## 当前待验收项
+`Press any key…` 是失败后的暂停提示，按键只关闭窗口，不会恢复安装。新版 `install.cmd` 会先显示确切的 `Missing required file` 路径：
 
-候选包未签名，Windows 实机与 0.4 新包安装需要单独验收。Computer Use 页面操作、真实 WorkBuddy 业务目前受 Mac 锁定影响，尚未证明可用；四家云端暂无账户 Key，仅有协议测试，真实调用仍需验证。真实 Ollama 调用已观察到，但不能推定所有业务闭环完成。以开发日志中的最终证据为准。
+1. 确认下载的是上方指定的 `codex/local-installer-preview` 分支，不是旧提交或仓库默认分支。
+2. 确认执行了“全部解压”，并从项目根目录运行；不要在 ZIP 内直接启动，也不要只复制 `install.cmd`。
+3. 检查提示路径中的文件是否存在，尤其是 `installer/vendor/windows-x64/uv.exe`。若解压后消失，查看安全软件隔离记录。
+4. 保留缺少文件路径和退出码反馈即可，不要附带 Key、认证链接或整个数据目录。
 
-## Windows 源码入口与文件完整性
+构建器会校验二进制 SHA256、版本和必需文件；源码完整性与 Windows 实机安装是否成功仍是不同验证项。
 
-从 0.4.0b3 起，本预览分支的 Git 克隆和源码 ZIP 均包含 Windows uv，根目录 `install.cmd` 可启动安装。Mac 源码目录仍不包含 Mac uv，请使用平台包。旧提交的 Windows 源码入口缺少 uv，重复克隆旧提交不会补齐。
+## 当前验证边界
 
-启动器会显示确切的 `Missing required file` 路径。平台 ZIP 内必须存在 `installer/vendor/windows-x64/uv.exe` 和 `installer/bootstrap.py`，且与 `install.cmd` 保持原目录结构。新版构建前后均校验二进制 SHA256，并拒绝缺文件的产物。
+0.5 已通过自动化回归、真实 FFmpeg 合成媒体处理、隔离环境的真实浏览器交互，以及本地候选包内容检查、解压后服务启动和 HTTP MCP 验证。模型测试使用合成素材与测试替身，不代表真实收费服务效果；解压服务验证也不等于从零运行安装器。
+
+线上视频下载、新版 Windows 桌面操作、真实云端视觉 / ASR 质量、真实系统凭据迁移、WorkBuddy 原生信任及真实业务仍待验证。0.4.0b3 的 Windows CI 与历史 Ollama 结果只证明当时版本。完整范围见 [README](../README.md#验证范围与试用边界)。

@@ -9,7 +9,7 @@ class GenerationTasks:
     def __init__(self, runtime):
         self.runtime = runtime
 
-    def _generate(self, params, prompt, progress, source=None):
+    def _generate(self, params, prompt, progress, source=None, validate=None):
         runtime = self.runtime
         if source is not None:
             progress.checkpoint("sources", source)
@@ -25,9 +25,9 @@ class GenerationTasks:
                 else:
                     progress.event(event)
 
-            generated = runtime.models.generate(
-                params["model_snapshot"], prompt, on_event=on_event
-            )
+            generated = runtime.models.generate(params["model_snapshot"], prompt, on_event=on_event)
+            if validate:
+                validate(generated["text"])
             progress.checkpoint("generated", generated)
         if (
             source is not None
@@ -56,7 +56,16 @@ class GenerationTasks:
             "只输出正文，不使用包裹全文的代码块，不输出 YAML frontmatter；"
             "来源、创建日期和待审核状态由服务端填写。\n\n资料：\n" + prepared["raw_content"]
         )
-        generated = self._generate(params, prompt, progress)
+        if prepared.get("illustrated"):
+            from .video_prompts import ILLUSTRATED_NOTE_PROMPT
+
+            prompt = ILLUSTRATED_NOTE_PROMPT + prepared["raw_content"]
+        validator = (
+            (lambda body: runtime.kb.validate_media_body(prepared["prepare_id"], body))
+            if prepared.get("illustrated")
+            else None
+        )
+        generated = self._generate(params, prompt, progress, validate=validator)
         progress({"phase": "saving", "message": "正在校验并保存待审核笔记。"})
         saved = runtime.kb.finalize(prepared["prepare_id"], generated["text"], independent=True)
         return {
