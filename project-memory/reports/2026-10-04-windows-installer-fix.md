@@ -2,6 +2,8 @@
 
 日期：2026-10-04（Asia/Shanghai）。目标分支：`codex/local-installer-preview`。
 
+最新结论：`0.4.0b3` 已推送至指定分支，代码提交 `718cbade172e139377c55a9e5f8144457a5ea4a3` 的三入口 Windows 自动化安装与服务验证全部通过；源码缺少启动组件及后续 Windows 服务身份误判均已修复。详细证据见本文末尾。Windows 桌面视觉及 WorkBuddy 原生验收仍未完成。
+
 ## 问题与已确认的证据
 
 用户从源码克隆后运行 `install.cmd`，反复收到 `Installation archive is incomplete`。原提交 `b82099ec950154d0d596c9c49db9d24ad9f40f78` 的脚本必须找到 `installer/vendor/windows-x64/uv.exe`，但 `.gitignore` 排除了整个 vendor，Git 树中没有这个文件。因此该提交的源码克隆和源码 ZIP 无法从此入口启动。
@@ -34,7 +36,7 @@
 
 独立中书方案已由门下 `APPROVE_PLAN`。审议明确允许：先完成本地验证和独立限定结果审议，普通推送待验证候选，以触发 Windows CI；在 Windows 实际通过之前不得宣称 Windows 安装已验证。
 
-当前记录为候选准备阶段，Windows CI 尚未运行。后续实际命令结果、提交与 run URL 将在本文件补记。
+本节记录最初的候选准备阶段；当时 Windows CI 尚未运行。后续实际命令结果、提交与 run URL 依次补记于下文。
 
 ## 验证边界
 
@@ -78,4 +80,35 @@ Windows 执行器上的真实安装、服务及协议测试不能替代用户 Wi
 | `PersonalKB-0.4.0b3-windows-x64.zip` | 17571636 | `3f27fa70ad88a2b518329bcb07311f3da91f8532d86012b9eac566ecdad53670` |
 | `PersonalKB-0.4.0b3-macos-arm64.zip` | 16846423 | `1555f5e4588f8fe969f5a37c96754167f1d14a6b0d7c6180fdc5edee90f1a151` |
 
-0.4.0b2 候选及原哈希保留，0.4.0b3 Windows 结果待下一轮真实 CI 后补记。
+0.4.0b2 候选及原哈希保留，0.4.0b3 的真实 Windows 结果如下。
+
+## 第二轮 Windows 实测：三个入口全部通过
+
+独立增量结果审议批准候选推送后，代码提交 `718cbade172e139377c55a9e5f8144457a5ea4a3` 已普通推送至指定分支。[Windows CI 37174858885](https://github.com/KamisanaAtair/Obsidian-personal-kb-MCP-server/actions/runs/37174858885) 在 2026-10-04 完成，三个 Windows Server 2022 作业均为 `success`。各作业均真实运行 `install.cmd`，使用含中文和空格的独立临时源码及安装目录。
+
+| 输入方式 | 安装及服务 | 运行时启动器 PID → 实际解释器 PID | MCP 与退出 |
+| --- | --- | --- | --- |
+| 指定提交的干净克隆 | PASS | 6952 → 956 | PASS |
+| 指定提交的源码 ZIP | PASS | 3004 → 544 | PASS |
+| 仓库中的实际 Windows 平台 ZIP | PASS | 1104 → 7004 | PASS |
+
+三个实际 PID 探针均确认：解释器 PID 不同于启动器 PID，解释器的父 PID 等于启动器 PID，探针退出码为 0。该证据支持本次改用每次启动标识识别服务的修复；不再仅凭官方源码推断 Windows 进程行为。
+
+每个入口均通过以下检查：
+
+- 启动文件及官方 uv 完整性，缺失 uv / bootstrap 时的失败提示。
+- 真实准备私有 Python `3.11.15` 及锁定的基础依赖；`--prepare-only` 不启动服务。
+- `install.cmd --no-browser` 成功返回，服务 health、版本、实例、payload 与本次启动标识匹配。
+- 页面静态资源及 HTTP 认证隔离；安装后 MCP SDK 列出全部 10 个工具，并成功调用 `get_status`。未把列出工具视为十项业务均已执行。
+- 移走原始源码目录后，持久启动入口仍能打开并复用相同服务 PID、实例及启动标识。
+- 实际认证关闭服务并确认进程退出，结果明确为 `AUTHENTICATED_SHUTDOWN`，没有用已退出状态替代成功。
+
+三个作业的 `passed` 均为 `true`。浏览器自动打开、桌面视觉与真实 WorkBuddy 原生操作未执行，仍为待验证；本次结论限定于 Windows 安装、后台服务和已列明的协议检查。
+
+## 远端交付与证据范围
+
+已按完整代码提交 SHA 重新下载 GitHub 上的 `installer/bootstrap.py`、`local_app/server.py` 及两份 `0.4.0b3` ZIP，字节与本地审议产物一致；两包大小、SHA256 与上表一致。每份 ZIP 的 70 个源码/文档文件与提交树匹配（cmd 统一 CRLF），剩余 uv 文件与已验证的官方二进制匹配，ZIP CRC 通过。候选文本扫描未发现秘密；二进制来源由官方精确哈希和包内容核对支持，不把文本扫描称为完整二进制安全检测。
+
+此次后续提交仅补记本报告，安装源码、CI 和安装包保持已通过的 `718cbad` 内容。未修改默认分支，未创建 Release，未覆盖旧版包。历史内部报告、私有项目记忆、原始 CI 日志及合成安装数据不纳入上传。
+
+用户可[直接下载 Windows 0.4.0b3 ZIP](https://github.com/KamisanaAtair/Obsidian-personal-kb-MCP-server/raw/refs/heads/codex/local-installer-preview/preview-releases/0.4.0b3/PersonalKB-0.4.0b3-windows-x64.zip)，完整解压后运行 `install.cmd`；源码克隆须指定 `codex/local-installer-preview` 分支。首次安装仍需要联网下载私有 Python 和基础依赖。
