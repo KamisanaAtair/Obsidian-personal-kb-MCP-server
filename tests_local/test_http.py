@@ -2,18 +2,18 @@
 
 import asyncio
 import json
-from pathlib import Path
 import socket
 import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
 import httpx
-from mcp import ClientSession
-from mcp.client.streamable_http import streamable_http_client
 import pytest
 import uvicorn
+from mcp import ClientSession
+from mcp.client.streamable_http import streamable_http_client
 
 from local_app.server import Runtime, create_app
 
@@ -28,7 +28,9 @@ def service(tmp_path):
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    runtime = Runtime(tmp_path / "data", port, tmp_path / "workbuddy" / "mcp.json")
+    with pytest.MonkeyPatch.context() as environment:
+        environment.setenv("PERSONAL_KB_LAUNCH_ID", "a" * 32)  # Synthetic startup ID.
+        runtime = Runtime(tmp_path / "data", port, tmp_path / "workbuddy" / "mcp.json")
     server = uvicorn.Server(
         uvicorn.Config(
             create_app(runtime),
@@ -60,7 +62,10 @@ def test_http_auth_origin_and_configuration_preservation(service):
     }
     path.write_text(json.dumps(original), encoding="utf-8")
     with httpx.Client(base_url=runtime.url, trust_env=False) as client:
-        assert client.get("/health").status_code == 200
+        health = client.get("/health")
+        assert health.status_code == 200
+        assert health.json()["launch_id"] == runtime.launch_id == "a" * 32
+        assert json.loads((runtime.data / "service.json").read_text())["launch_id"] == runtime.launch_id
         assert client.get("/api/status").status_code == 401
         assert client.post("/mcp", json={}).status_code == 401
         headers = {"Authorization": "Bearer " + runtime.auth["ui_token"]}
@@ -174,3 +179,9 @@ def test_basic_server_import_does_not_load_heavy_components():
         [sys.executable, "-c", code], capture_output=True, timeout=20
     )
     assert result.returncode == 0, result.stderr.decode()
+
+
+def test_invalid_installer_launch_identifier_is_rejected(tmp_path, monkeypatch):
+    monkeypatch.setenv("PERSONAL_KB_LAUNCH_ID", "invalid")
+    with pytest.raises(ValueError, match="launch identifier"):
+        Runtime(tmp_path / "data", 32123)

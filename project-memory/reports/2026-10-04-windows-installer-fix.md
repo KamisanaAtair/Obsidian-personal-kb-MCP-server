@@ -54,3 +54,28 @@ Windows 执行器上的真实安装、服务及协议测试不能替代用户 Wi
 | `PersonalKB-0.4.0b2-macos-arm64.zip` | 16846127 | `e92e70e889b68dfa01bb674ee5f95e553aaa5925a32824d9a08c7dc8a9bf068e` |
 
 本表是候选文件完整性证据；Windows 安装通过须等实际 Actions 运行。
+
+## 首轮 Windows 实测：未通过，继续修复
+
+候选提交 `8f2fc337bf619da9020ed3d49e7dfb4172519998` 经独立限定 `APPROVE_RESULT` 后普通推送。按该提交重新下载远端 install.cmd、Windows uv 和两份 ZIP，均与已审候选一致。
+
+[首轮 Windows CI](https://github.com/KamisanaAtair/Obsidian-personal-kb-MCP-server/actions/runs/37173906647) 三个入口均通过启动文件与 uv 版本检查、缺文件报错负例、真实 Python 3.11.15 与基础依赖安装；均在服务启动就绪判断处失败，不能作为安装成功交付。
+
+原启动器强制要求 `service.json.pid == Popen.pid`。官方 [CPython 3.11.15 Windows 启动器](https://github.com/python/cpython/blob/v3.11.15/PC/launcher.c#L767) 会创建并等待子进程，支持 PID 不同的根因假设；下一轮实际运行时 PID 探针继续验证，不将文档推断冒充实测。
+
+首轮 CI 清理状态存在证据缺口：进程已经退出也被记为 `authenticated_shutdown: PASS`，因此不能据此声称真正执行过认证退出或当时服务健康。测试现明确区分 `AUTHENTICATED_SHUTDOWN`、`ALREADY_EXITED`、`NOT_STARTED`，完整成功必须实际认证关闭并确认服务进程退出。
+
+## 0.4.0b3 增量候选
+
+独立增量方案已获 `APPROVE_PLAN`。每次真正启动生成新的 `launch_id`，只放进该子进程的环境副本；服务记录和 health 必须同时匹配本次标识，并保留 PID 存活、端口、实例、版本和 payload 校验。已有服务复用保持原启动身份。该标识不替代 UI/MCP 认证，也没有放宽回环边界、增加超时或修改 Windows JobObject 标志。
+
+新增检查覆盖不同 launcher/interpreter PID、旧或缺失启动标识、其他身份不一致、环境不被修改和已运行服务复用。HTTP 实测验证启动标识记录及原认证隔离。Windows CI 加入实际 PID 探针，并要求 cmd/uv 退出后服务继续提供页面与 MCP。
+
+本地完整回归：193 项测试、18 个子测试通过（18.69 秒）。修复期间曾因复用测试 fixture 的参数变化出现 7 个 setup 错误，已保持原接口并完整重跑，相关失败记录留在本地验证目录；不影响旧候选结果的如实保留。
+
+| 新包 | 字节数 | SHA256 |
+| --- | ---: | --- |
+| `PersonalKB-0.4.0b3-windows-x64.zip` | 17571636 | `3f27fa70ad88a2b518329bcb07311f3da91f8532d86012b9eac566ecdad53670` |
+| `PersonalKB-0.4.0b3-macos-arm64.zip` | 16846423 | `1555f5e4588f8fe969f5a37c96754167f1d14a6b0d7c6180fdc5edee90f1a151` |
+
+0.4.0b2 候选及原哈希保留，0.4.0b3 Windows 结果待下一轮真实 CI 后补记。

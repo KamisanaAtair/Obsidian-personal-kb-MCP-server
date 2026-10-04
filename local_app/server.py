@@ -78,6 +78,12 @@ class Runtime:
         self.url = f"http://127.0.0.1:{port}"
         self.instance_id = secrets.token_hex(12)
         self.payload_sha256 = os.environ.get("PERSONAL_KB_PAYLOAD_SHA256")
+        self.launch_id = os.environ.get("PERSONAL_KB_LAUNCH_ID")
+        if self.launch_id is not None and (
+            len(self.launch_id) != 32
+            or any(c not in "0123456789abcdef" for c in self.launch_id)
+        ):
+            raise ValueError("Invalid installer launch identifier")
         self.workbuddy_config = workbuddy_config or Path.home() / ".workbuddy" / "mcp.json"
         auth_path = self.data / "auth.json"
         if auth_path.is_symlink():
@@ -118,6 +124,7 @@ class Runtime:
                 "version": __version__,
                 "instance_id": self.instance_id,
                 "payload_sha256": self.payload_sha256,
+                "launch_id": self.launch_id,
             },
         )
 
@@ -511,6 +518,7 @@ def create_app(runtime: Runtime):
                 "version": __version__,
                 "instance_id": runtime.instance_id,
                 "payload_sha256": runtime.payload_sha256,
+                "launch_id": runtime.launch_id,
             }
         )
 

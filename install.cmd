@@ -15,7 +15,7 @@ set "KB_UV=%KB_SOURCE%installer\vendor\windows-x64\uv.exe"
 if not exist "%KB_UV%" (
   echo ERROR: Missing required file: "%KB_UV%"
   echo This copy cannot start because its Windows launcher component is missing.
-  echo Use the complete 0.4.0b2 Windows ZIP or the updated codex/local-installer-preview branch.
+  echo Use the complete 0.4.0b3 Windows ZIP or the updated codex/local-installer-preview branch.
   echo Keep install.cmd together with the installer folder after extracting or cloning.
   echo If the file disappeared after extraction, check your security software's quarantine history.
   echo Press any key to close this failed attempt. This does not resume installation.

@@ -1,14 +1,14 @@
-# Personal KB 0.4.0b2 试用指南
+# Personal KB 0.4.0b3 试用指南
 
 这一版可以继续使用 WorkBuddy 的模型，也能在本地页面选择自己的生成模型。界面默认黑紫，可用右上角按钮切换白紫。当前验收进展与限制见 [开发日志](https://github.com/KamisanaAtair/Obsidian-personal-kb-MCP-server/blob/codex/local-installer-preview/project-memory/reports/2026-10-03-model-settings-development.md)。
 
 ## 安装并打开
 
-1. 从 [README 下载入口](README.md#首次使用) 取得 0.4.0b2 平台包。Windows 需要 x64，Mac 需要 Apple 芯片及 macOS 14 或以上；不支持 Intel Mac。
+1. 从 [README 下载入口](README.md#首次使用) 取得 0.4.0b3 平台包。Windows 需要 x64，Mac 需要 Apple 芯片及 macOS 14 或以上；不支持 Intel Mac。
 2. 完整解压平台 ZIP；Windows 也可完整克隆本分支或解压源码 ZIP。双击 `install.cmd`（Windows）或 `install.command`（Mac）。首次会联网准备私有 Python 和依赖，无需预装 Python、Git 或手动输入命令。
 3. 自动打开“Personal KB · 你的本机知识库”。工作台显示连接与组件状态；安装阶段不会选择或扫描笔记库。
 
-旧 0.3 安装包仍保留，但没有新的模型设置页面。重新打开时可检查页脚版本；若仍显示旧版，请先停止旧服务，再使用 0.4.0b2 入口启动。
+旧 0.3 安装包仍保留，但没有新的模型设置页面。重新打开时可检查页脚版本；若仍显示旧版，请先停止旧服务，再使用 0.4.0b3 入口启动。
 
 ## 选择自己的模型
 
@@ -72,4 +72,4 @@
 
 ## Windows 启动文件缺失
 
-0.4.0b2 的 Windows 平台包和本分支源码均带有 `installer/vendor/windows-x64/uv.exe`。如果启动器显示 `Missing required file`，窗口会列出缺少文件的完整路径；请核对运行目录及该文件是否实际存在。不要单独复制 `install.cmd`。如果文件解压后消失，可检查安全软件隔离记录。按键只会关闭本次失败窗口，不会恢复安装。
+0.4.0b3 的 Windows 平台包和本分支源码均带有 `installer/vendor/windows-x64/uv.exe`。如果启动器显示 `Missing required file`，窗口会列出缺少文件的完整路径；请核对运行目录及该文件是否实际存在。不要单独复制 `install.cmd`。如果文件解压后消失，可检查安全软件隔离记录。按键只会关闭本次失败窗口，不会恢复安装。

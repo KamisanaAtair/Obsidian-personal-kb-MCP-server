@@ -8,11 +8,9 @@ separate action in the local interface.
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
 import hashlib
 import json
 import os
-from pathlib import Path
 import platform
 import shutil
 import socket
@@ -20,11 +18,13 @@ import subprocess
 import sys
 import tempfile
 import time
+import webbrowser
+from contextlib import contextmanager
+from pathlib import Path
 from urllib.error import URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 from uuid import uuid4
-import webbrowser
 
 SOURCE_ROOT = Path(__file__).resolve().parent.parent
 PAYLOAD_DIRS = ("config", "core", "mcp_server", "local_app", "installer")
@@ -471,7 +471,12 @@ def health(port: int) -> dict:
 
 
 def known_service(
-    data: Path, port: int, version: str, payload_sha256: str | None = None
+    data: Path,
+    port: int,
+    version: str,
+    payload_sha256: str | None = None,
+    *,
+    expected_launch_id: str | None = None,
 ) -> dict | None:
     record = read_json(data / "service.json")
     if (
@@ -481,6 +486,13 @@ def known_service(
     ):
         return None
     current = health(port)
+    if expected_launch_id is not None and (
+        len(expected_launch_id) != 32
+        or any(c not in "0123456789abcdef" for c in expected_launch_id)
+        or record.get("launch_id") != expected_launch_id
+        or current.get("launch_id") != expected_launch_id
+    ):
+        return None
     if payload_sha256 and (
         record.get("payload_sha256") != payload_sha256
         or current.get("payload_sha256") != payload_sha256
@@ -500,14 +512,10 @@ def port_in_use(port: int) -> bool:
         return probe.connect_ex(("127.0.0.1", port)) == 0
 
 
-def start_service(
-    runtime: Path, home: Path, release: dict, env: dict[str, str], port: int
-) -> dict:
+def start_service(runtime: Path, home: Path, release: dict, env: dict[str, str], port: int) -> dict:
     data = home / "data"
     data.mkdir(parents=True, exist_ok=True)
-    existing = known_service(
-        data, port, release["version"], env.get("PERSONAL_KB_PAYLOAD_SHA256")
-    )
+    existing = known_service(data, port, release["version"], env.get("PERSONAL_KB_PAYLOAD_SHA256"))
     if existing:
         return existing
     if port_in_use(port):
@@ -520,8 +528,7 @@ def start_service(
         {"start_new_session": True}
         if sys.platform != "win32"
         else {
-            "creationflags": subprocess.DETACHED_PROCESS
-            | subprocess.CREATE_NEW_PROCESS_GROUP,
+            "creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
         }
     )
     command = [
@@ -537,13 +544,17 @@ def start_service(
         "--no-browser",
     ]
     log_path = logs / "service.log"
+    # Windows venv launchers may create a child interpreter with another PID.
+    # Bind readiness to this launch without weakening the existing identity checks.
+    launch_id = uuid4().hex
+    child_env = {**env, "PERSONAL_KB_LAUNCH_ID": launch_id}
     with log_path.open("ab") as log:
         if sys.platform != "win32":
             log_path.chmod(0o600)
         process = subprocess.Popen(
             command,
             cwd=runtime / "app",
-            env=env,
+            env=child_env,
             stdin=subprocess.DEVNULL,
             stdout=log,
             stderr=log,
@@ -553,13 +564,15 @@ def start_service(
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
         if process.poll() is not None:
-            raise InstallError(
-                f"The local service exited during startup. See {log_path}"
-            )
+            raise InstallError(f"The local service exited during startup. See {log_path}")
         record = known_service(
-            data, port, release["version"], env.get("PERSONAL_KB_PAYLOAD_SHA256")
+            data,
+            port,
+            release["version"],
+            env.get("PERSONAL_KB_PAYLOAD_SHA256"),
+            expected_launch_id=launch_id,
         )
-        if record and record.get("pid") == process.pid:
+        if record:
             return record
         time.sleep(0.25)
     # Never kill a PID obtained from an untrusted/stale status file.

@@ -1,8 +1,8 @@
-# 本机安装与恢复（0.4.0b2）
+# 本机安装与恢复（0.4.0b3）
 
 [用户步骤](../README-FIRST.md) · [当前验证进度](https://github.com/KamisanaAtair/Obsidian-personal-kb-MCP-server/blob/codex/local-installer-preview/project-memory/reports/2026-10-03-model-settings-development.md)
 
-使用 `preview-releases/0.4.0b2/PersonalKB-0.4.0b2-{macos-arm64,windows-x64}.zip` 中对应平台的安装包，完整解压后双击启动入口。无需复制 Skill 文件夹或向 WorkBuddy 发送两轮安装指令。0.3.0b1 历史包原样保留，不会自动获得新的模型设置功能。
+使用 `preview-releases/0.4.0b3/PersonalKB-0.4.0b3-{macos-arm64,windows-x64}.zip` 中对应平台的安装包，完整解压后双击启动入口。无需复制 Skill 文件夹或向 WorkBuddy 发送两轮安装指令。0.3.0b1 历史包原样保留，不会自动获得新的模型设置功能。
 
 ## 会看到的界面
 
@@ -53,6 +53,6 @@ Windows：`%LOCALAPPDATA%\PersonalKB`。Mac：`~/Library/Application Support/Per
 
 ## Windows 源码入口与文件完整性
 
-从 0.4.0b2 起，本预览分支的 Git 克隆和源码 ZIP 均包含 Windows uv，根目录 `install.cmd` 可启动安装。Mac 源码目录仍不包含 Mac uv，请使用平台包。旧提交的 Windows 源码入口缺少 uv，重复克隆旧提交不会补齐。
+从 0.4.0b3 起，本预览分支的 Git 克隆和源码 ZIP 均包含 Windows uv，根目录 `install.cmd` 可启动安装。Mac 源码目录仍不包含 Mac uv，请使用平台包。旧提交的 Windows 源码入口缺少 uv，重复克隆旧提交不会补齐。
 
 启动器会显示确切的 `Missing required file` 路径。平台 ZIP 内必须存在 `installer/vendor/windows-x64/uv.exe` 和 `installer/bootstrap.py`，且与 `install.cmd` 保持原目录结构。新版构建前后均校验二进制 SHA256，并拒绝缺文件的产物。

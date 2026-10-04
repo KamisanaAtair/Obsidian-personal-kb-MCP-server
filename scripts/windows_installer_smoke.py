@@ -203,6 +203,59 @@ def process_alive(pid: int) -> bool:
         kernel.CloseHandle(handle)
 
 
+def probe_runtime_process(python: Path, app: Path, env: dict) -> dict:
+    """Observe the actual Windows launcher/interpreter relationship, without mocks."""
+    code = (
+        "import json, os; print(json.dumps({'interpreter_pid': os.getpid(), "
+        "'interpreter_ppid': os.getppid()}), flush=True)"
+    )
+    process = subprocess.Popen(
+        [str(python), "-c", code],
+        cwd=app,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        close_fds=True,
+        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+        encoding="utf-8",
+        errors="replace",
+    )
+    try:
+        output, _ = process.communicate(timeout=20)
+    except subprocess.TimeoutExpired as exc:
+        # This is the direct handle of our short-lived synthetic probe, never
+        # a service PID recovered from a state file.
+        process.kill()
+        process.communicate(timeout=10)
+        raise SmokeFailure("Installed interpreter PID probe timed out") from exc
+    require(process.returncode == 0, "Installed interpreter PID probe failed")
+    observed = json.loads(output)
+    require(
+        all(
+            type(observed.get(key)) is int and observed[key] > 0
+            for key in ("interpreter_pid", "interpreter_ppid")
+        ),
+        "Installed interpreter did not return valid PID observations",
+    )
+    return {
+        "launcher_pid": process.pid,
+        **observed,
+        "pid_differs": process.pid != observed["interpreter_pid"],
+        "interpreter_parent_is_launcher": process.pid == observed["interpreter_ppid"],
+        "exit_code": process.returncode,
+    }
+
+
+def matching_launch_id(record: dict, health: dict) -> bool:
+    value = record.get("launch_id")
+    return bool(
+        isinstance(value, str)
+        and re.fullmatch(r"[0-9a-f]{32}", value)
+        and health.get("launch_id") == value
+    )
+
+
 def auth_for(home: Path) -> dict:
     auth = read_json(home / "data" / "auth.json")
     for key in ("token", "ui_token"):
@@ -215,14 +268,14 @@ def auth_for(home: Path) -> dict:
     return auth
 
 
-def stop_owned_service(home: Path, port: int) -> bool:
+def stop_owned_service(home: Path, port: int) -> str:
     record_path = home / "data" / "service.json"
     if not record_path.exists():
-        return False
+        return "NOT_STARTED"
     record = read_json(record_path)
     require(isinstance(record.get("pid"), int) and record["pid"] > 0, "Invalid owned service PID")
     if not process_alive(record["pid"]):
-        return True
+        return "ALREADY_EXITED"
     status, raw = http(port, "/health")
     health = json.loads(raw)
     active = read_json(home / "active.json")
@@ -230,6 +283,7 @@ def stop_owned_service(home: Path, port: int) -> bool:
         status == 200
         and record.get("port") == port
         and health.get("instance_id") == record.get("instance_id")
+        and matching_launch_id(record, health)
         and health.get("payload_sha256")
         == active.get("payload_sha256")
         == record.get("payload_sha256"),
@@ -242,7 +296,21 @@ def stop_owned_service(home: Path, port: int) -> bool:
     while process_alive(record["pid"]) and time.monotonic() < deadline:
         time.sleep(0.25)
     require(not process_alive(record["pid"]), "Owned service did not exit after shutdown")
-    return True
+    return "AUTHENTICATED_SHUTDOWN"
+
+
+def failure_service_log(home: Path) -> str | None:
+    """Read only the isolated test log after registering its tokens for redaction."""
+    try:
+        auth_for(home)
+        with (home / "logs" / "service.log").open("rb") as stream:
+            stream.seek(0, os.SEEK_END)
+            stream.seek(max(0, stream.tell() - 12000))
+            return sanitized(stream.read(12000).decode("utf-8", errors="replace"))
+    except (SmokeFailure, OSError, ValueError, KeyError):
+        # Without valid synthetic credentials, suppress the log instead of
+        # guessing whether its contents are safe to publish.
+        return None
 
 
 async def mcp_check(home: Path, port: int) -> dict:
@@ -412,6 +480,9 @@ def smoke(case: str) -> int:
             "payload_sha256": active["payload_sha256"],
         }
 
+        phase = "installed interpreter PID probe"
+        checks["runtime_process_probe"] = probe_runtime_process(python, app, env)
+
         phase = "service start"
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
@@ -426,6 +497,7 @@ def smoke(case: str) -> int:
             and health["version"] == release["version"] == record["version"]
             and health["payload_sha256"] == active["payload_sha256"] == record["payload_sha256"]
             and health["instance_id"] == record["instance_id"]
+            and matching_launch_id(record, health)
             and record["port"] == port
             and process_alive(record["pid"]),
             "Health does not identify the prepared test service",
@@ -496,6 +568,8 @@ def smoke(case: str) -> int:
             status == 200
             and reopened["pid"] == record["pid"]
             and reopened["instance_id"] == reopened_health["instance_id"] == record["instance_id"]
+            and matching_launch_id(reopened, reopened_health)
+            and reopened["launch_id"] == record["launch_id"]
             and reopened_health["payload_sha256"] == active["payload_sha256"]
             and process_alive(record["pid"]),
             "Persistent launcher failed to reuse the same running service",
@@ -504,13 +578,20 @@ def smoke(case: str) -> int:
         summary["passed"] = True
     except Exception as exc:
         summary["failed_phase"] = phase
+        log = failure_service_log(home)
+        if log:
+            summary["service_log_tail"] = log
         summary["error"] = sanitized(f"{type(exc).__name__}: {exc}")
     finally:
         if port:
             try:
-                checks["authenticated_shutdown"] = (
-                    "PASS" if stop_owned_service(home, port) else "NOT_STARTED"
-                )
+                cleanup = stop_owned_service(home, port)
+                checks["authenticated_shutdown"] = cleanup
+                if summary["passed"] and cleanup != "AUTHENTICATED_SHUTDOWN":
+                    summary["passed"] = False
+                    summary["cleanup_error"] = (
+                        "Successful acceptance requires authenticated shutdown and process exit"
+                    )
             except (SmokeFailure, OSError, URLError, ValueError, KeyError) as exc:
                 summary["passed"] = False
                 summary["cleanup_error"] = sanitized(f"{type(exc).__name__}: {exc}")
